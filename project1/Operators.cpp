@@ -9,9 +9,12 @@ bool Scan::require(SelectInfo info)
 {
     if (info.binding != relationBinding)
         return false;
+
     assert(info.colId < relation.columns.size());
+
     resultColumns.push_back(relation.columns[info.colId]);
     select2ResultColId[info] = resultColumns.size() - 1;
+
     return true;
 }
 //---------------------------------------------------------------------------
@@ -33,7 +36,9 @@ bool FilterScan::require(SelectInfo info)
 {
     if (info.binding != relationBinding)
         return false;
+
     assert(info.colId < relation.columns.size());
+
     if (select2ResultColId.find(info) == select2ResultColId.end())
     {
         // Add to results
@@ -42,6 +47,7 @@ bool FilterScan::require(SelectInfo info)
         unsigned colId = tmpResults.size() - 1;
         select2ResultColId[info] = colId;
     }
+
     return true;
 }
 //---------------------------------------------------------------------------
@@ -67,6 +73,7 @@ bool FilterScan::applyFilter(uint64_t i, FilterInfo& f)
         case FilterInfo::Comparison::Less:
             return compareCol[i] < constant;
     };
+
     return false;
 }
 //---------------------------------------------------------------------------
@@ -80,6 +87,7 @@ void FilterScan::run()
         {
             pass &= applyFilter(i, f);
         }
+
         if (pass)
             copy2Result(i);
     }
@@ -89,10 +97,12 @@ vector<uint64_t*> Operator::getResults()
 // Get materialized results
 {
     vector<uint64_t*> resultVector;
+
     for (auto& c : tmpResults)
     {
         resultVector.push_back(c.data());
     }
+
     return resultVector;
 }
 //---------------------------------------------------------------------------
@@ -125,10 +135,12 @@ void Join::copy2Result(uint64_t leftId, uint64_t rightId)
 // Copy to result
 {
     unsigned relColId = 0;
-    for (unsigned cId = 0; cId < copyLeftData.size(); ++cId)
+    const unsigned copyLeftDataSize = copyLeftData.size();
+    for (unsigned cId = 0; cId < copyLeftDataSize; ++cId)
         tmpResults[relColId++].push_back(copyLeftData[cId][leftId]);
 
-    for (unsigned cId = 0; cId < copyRightData.size(); ++cId)
+    const unsigned copyRightDataSize = copyRightData.size();
+    for (unsigned cId = 0; cId < copyRightDataSize; ++cId)
         tmpResults[relColId++].push_back(copyRightData[cId][rightId]);
     ++resultSize;
 }
@@ -191,7 +203,8 @@ void Join::run()
 void SelfJoin::copy2Result(uint64_t id)
 // Copy to result
 {
-    for (unsigned cId = 0; cId < copyData.size(); ++cId)
+    const unsigned copyDataSize = copyData.size();
+    for (unsigned cId = 0; cId < copyDataSize; ++cId)
         tmpResults[cId].push_back(copyData[cId][id]);
     ++resultSize;
 }
@@ -201,6 +214,7 @@ bool SelfJoin::require(SelectInfo info)
 {
     if (requiredIUs.count(info))
         return true;
+
     if (input->require(info))
     {
         tmpResults.emplace_back();
