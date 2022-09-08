@@ -10,12 +10,15 @@ set(CMAKE_CXX_FLAGS_DEBUG "${CMAKE_CXX_FLAGS_DEBUG} -g -fsanitize=address -Wall"
 
 include_directories(include)
 
+find_package(Threads REQUIRED)
+
 
 add_library(database Relation.cpp Operators.cpp Parser.cpp Utils.cpp Joiner.cpp)
 target_include_directories(database PUBLIC
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
     $<INSTALL_INTERFACE:include>
     PRIVATE src)
+target_link_libraries(database ${CMAKE_THREAD_LIBS_INIT})
 
 OPTION(FORCE_TESTS "Build tests, regardless of build type." ON)
 if (CMAKE_BUILD_TYPE MATCHES "[Dd][Ee][Bb][Uu][Gg]" OR FORCE_TESTS)
