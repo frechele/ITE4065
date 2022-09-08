@@ -1,6 +1,8 @@
 #include <Operators.hpp>
 #include <cassert>
 #include <iostream>
+
+#include <ThreadPool.hpp>
 //---------------------------------------------------------------------------
 using namespace std;
 //---------------------------------------------------------------------------
@@ -261,8 +263,15 @@ void Checksum::run()
     input->run();
     auto results = input->getResults();
 
-    for (auto& sInfo : colInfo)
+    unsigned colInfoSize = colInfo.size();
+    checkSums.resize(colInfoSize);
+
+    for (unsigned i = 0; i < colInfoSize; ++i)
     {
+        auto& sInfo = colInfo[i];
+
+        ThreadPool::Get().PushTask(
+            [this, &results](int rank, SelectInfo& sInfo) {
         auto colId = input->resolve(sInfo);
         auto resultCol = results[colId];
         uint64_t sum = 0;
@@ -270,7 +279,12 @@ void Checksum::run()
         for (auto iter = resultCol, limit = iter + input->resultSize;
              iter != limit; ++iter)
             sum += *iter;
-        checkSums.push_back(sum);
+
+                checkSums[rank] = sum;
+            },
+            i, std::ref(sInfo));
     }
+
+    ThreadPool::Get().WaitAll();
 }
 //---------------------------------------------------------------------------
