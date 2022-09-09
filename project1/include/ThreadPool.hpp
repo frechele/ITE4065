@@ -1,5 +1,6 @@
 #pragma once
 
+#include <algorithm>
 #include <atomic>
 #include <condition_variable>
 #include <deque>
@@ -12,7 +13,7 @@
 class ThreadPool final
 {
  public:
-    ThreadPool() : workers_(std::thread::hardware_concurrency())
+    ThreadPool() : workers_(GetNumWorkers())
     {
         instance_ = this;
 
@@ -33,6 +34,11 @@ class ThreadPool final
         for (auto& worker : workers_)
             if (worker.joinable())
                 worker.join();
+    }
+
+    static unsigned GetNumWorkers()
+    {
+        return std::thread::hardware_concurrency();
     }
 
     static ThreadPool& Get()
@@ -106,3 +112,32 @@ class ThreadPool final
 
     inline static ThreadPool* instance_{ nullptr };
 };
+
+template <class IndexT, typename Func>
+inline void parallel_for(IndexT begin, IndexT end, Func&& f,
+                         unsigned numWorkers = 0)
+{
+    const IndexT totalSize = end - begin;
+
+    unsigned numBlocks = numWorkers ? numWorkers : ThreadPool::GetNumWorkers();
+    unsigned blockSize = totalSize / numBlocks;
+
+    if (blockSize == 0)
+    {
+        f(begin, end);
+    }
+    else
+    {
+        for (IndexT blockID = 0; blockID < numBlocks; ++blockID)
+        {
+            const auto blockBegin = begin + blockID * blockSize;
+            const auto blockEnd =
+                (blockID == numBlocks - 1) ? end : blockBegin + blockSize;
+
+            ThreadPool::Get().PushTask(
+                [blockBegin, blockEnd, f]() { f(blockBegin, blockEnd); });
+        }
+
+        ThreadPool::Get().WaitAll();
+    }
+}
