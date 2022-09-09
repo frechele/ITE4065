@@ -168,15 +168,28 @@ void Join::run()
 
     // Resolve the input columns
     unsigned resColId = 0;
-    for (auto& info : requestedColumnsLeft)
+
+    const unsigned requestedLeftSize = requestedColumnsLeft.size();
+    const unsigned requestedRightSize = requestedColumnsRight.size();
+
+    if (requestedLeftSize)
     {
-        copyLeftData.push_back(leftInputData[left->resolve(info)]);
-        select2ResultColId[info] = resColId++;
+        copyLeftData.reserve(requestedLeftSize);
+        for (auto& info : requestedColumnsLeft)
+        {
+            copyLeftData.push_back(leftInputData[left->resolve(info)]);
+            select2ResultColId[info] = resColId++;
+        }
     }
-    for (auto& info : requestedColumnsRight)
+
+    if (requestedRightSize)
     {
-        copyRightData.push_back(rightInputData[right->resolve(info)]);
-        select2ResultColId[info] = resColId++;
+        copyRightData.reserve(requestedRightSize);
+        for (auto& info : requestedColumnsRight)
+        {
+            copyRightData.push_back(rightInputData[right->resolve(info)]);
+            select2ResultColId[info] = resColId++;
+        }
     }
 
     auto leftColId = left->resolve(pInfo.left);
