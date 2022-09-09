@@ -3,10 +3,9 @@
 #include <algorithm>
 #include <atomic>
 #include <condition_variable>
-#include <deque>
 #include <functional>
-#include <future>
 #include <mutex>
+#include <queue>
 #include <thread>
 #include <vector>
 
@@ -53,22 +52,18 @@ class ThreadPool final
     }
 
     template <typename Func, typename... Args>
-    std::future<void> PushTask(Func&& f, Args&&... args)
+    void PushTask(Func&& f, Args&&... args)
     {
-        auto task = std::make_shared<std::packaged_task<void()>>(
-            std::bind(std::forward<Func>(f), std::forward<Args>(args)...));
-
-        auto future = task->get_future();
+        auto task =
+            std::bind(std::forward<Func>(f), std::forward<Args>(args)...);
 
         {
             std::scoped_lock lock(mutex_);
-            tasks_.emplace_back([task]() { (*task)(); });
+            tasks_.emplace(task);
         }
 
         std::atomic_fetch_add(&taskCounter_, 1);
         cv_.notify_one();
-
-        return future;
     }
 
  private:
@@ -85,7 +80,7 @@ class ThreadPool final
                     break;
 
                 task = std::move(tasks_.front());
-                tasks_.pop_front();
+                tasks_.pop();
             }
 
             task();
@@ -98,7 +93,7 @@ class ThreadPool final
 
  private:
     std::vector<std::thread> workers_;
-    std::deque<std::function<void()>> tasks_;
+    std::queue<std::function<void()>> tasks_;
 
     // Thread control variables
     bool running_{ true };
