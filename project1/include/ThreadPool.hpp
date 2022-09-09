@@ -110,29 +110,31 @@ class ThreadPool final
 
 template <class IndexT, typename Func>
 inline void parallel_for(IndexT begin, IndexT end, Func&& f,
-                         unsigned numWorkers = 0)
+                         unsigned minBlockSize = 64)
 {
     const IndexT totalSize = end - begin;
 
-    unsigned numBlocks = numWorkers ? numWorkers : ThreadPool::GetNumWorkers();
-    unsigned blockSize = totalSize / numBlocks;
+    const unsigned desiredNumBlocks = totalSize / minBlockSize;
+    const unsigned numBlocks =
+        std::min(desiredNumBlocks, ThreadPool::GetNumWorkers());
 
-    if (blockSize == 0)
+    if (numBlocks <= 1)
     {
         f(begin, end);
+        return;
     }
-    else
+
+    const unsigned blockSize = totalSize / numBlocks;
+
+    for (IndexT blockID = 0; blockID < numBlocks; ++blockID)
     {
-        for (IndexT blockID = 0; blockID < numBlocks; ++blockID)
-        {
-            const auto blockBegin = begin + blockID * blockSize;
-            const auto blockEnd =
-                (blockID == numBlocks - 1) ? end : blockBegin + blockSize;
+        const auto blockBegin = begin + blockID * blockSize;
+        const auto blockEnd =
+            (blockID == numBlocks - 1) ? end : blockBegin + blockSize;
 
-            ThreadPool::Get().PushTask(
-                [blockBegin, blockEnd, f]() { f(blockBegin, blockEnd); });
-        }
-
-        ThreadPool::Get().WaitAll();
+        ThreadPool::Get().PushTask(
+            [blockBegin, blockEnd, f]() { f(blockBegin, blockEnd); });
     }
+
+    ThreadPool::Get().WaitAll();
 }
