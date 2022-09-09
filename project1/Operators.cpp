@@ -202,13 +202,12 @@ void Join::run()
     }
 }
 //---------------------------------------------------------------------------
-void SelfJoin::copy2Result(uint64_t id)
+void SelfJoin::copy2Result(int rank, uint64_t id)
 // Copy to result
 {
     const unsigned copyDataSize = copyData.size();
     for (unsigned cId = 0; cId < copyDataSize; ++cId)
-        tmpResults[cId].push_back(copyData[cId][id]);
-    ++resultSize;
+        tmpResults[cId][rank] = copyData[cId][id];
 }
 //---------------------------------------------------------------------------
 bool SelfJoin::require(SelectInfo info)
@@ -246,11 +245,32 @@ void SelfJoin::run()
 
     auto leftCol = inputData[leftColId];
     auto rightCol = inputData[rightColId];
+
+    std::vector<uint64_t> Ids;
+    Ids.reserve(input->resultSize);
+
     for (uint64_t i = 0; i < input->resultSize; ++i)
     {
         if (leftCol[i] == rightCol[i])
-            copy2Result(i);
+        {
+            Ids.push_back(i);
+            ++resultSize;
+        }
     }
+
+    const unsigned numOfIds = Ids.size();
+    const unsigned copyDataSize = copyData.size();
+    for (unsigned cId = 0; cId < copyDataSize; ++cId)
+    {
+        tmpResults[cId].resize(numOfIds);
+    }
+
+    parallel_for(0u, numOfIds, [this, &Ids](unsigned begin, unsigned end) {
+        for (unsigned i = begin; i < end; ++i)
+        {
+            copy2Result(i, Ids[i]);
+        }
+    });
 }
 //---------------------------------------------------------------------------
 void Checksum::run()

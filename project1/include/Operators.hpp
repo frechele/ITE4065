@@ -146,7 +146,7 @@ class SelfJoin : public Operator
     /// The join predicate info
     PredicateInfo& pInfo;
     /// Copy tuple to result
-    void copy2Result(uint64_t id);
+    void copy2Result(int rank, uint64_t id);
     /// The required IUs
     std::set<SelectInfo> requiredIUs;
 
