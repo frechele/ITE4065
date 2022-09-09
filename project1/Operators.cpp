@@ -266,25 +266,23 @@ void Checksum::run()
     unsigned colInfoSize = colInfo.size();
     checkSums.resize(colInfoSize);
 
-    for (unsigned i = 0; i < colInfoSize; ++i)
-    {
-        auto& sInfo = colInfo[i];
+    resultSize = input->resultSize;
 
-        ThreadPool::Get().PushTask(
-            [this, &results](int rank, SelectInfo& sInfo) {
-        auto colId = input->resolve(sInfo);
-        auto resultCol = results[colId];
-        uint64_t sum = 0;
-        resultSize = input->resultSize;
-        for (auto iter = resultCol, limit = iter + input->resultSize;
-             iter != limit; ++iter)
-            sum += *iter;
+    parallel_for(
+        0u, colInfoSize, [this, &results](unsigned begin, unsigned end) {
+            for (unsigned i = begin; i < end; ++i)
+            {
+                auto& sInfo = colInfo[i];
+                auto colId = input->resolve(sInfo);
+                auto resultCol = results[colId];
 
-                checkSums[rank] = sum;
-            },
-            i, std::ref(sInfo));
-    }
+                uint64_t sum = 0;
+                for (auto iter = resultCol, limit = iter + input->resultSize;
+                     iter != limit; ++iter)
+                    sum += *iter;
 
-    ThreadPool::Get().WaitAll();
+                checkSums[i] = sum;
+            }
+        });
 }
 //---------------------------------------------------------------------------
