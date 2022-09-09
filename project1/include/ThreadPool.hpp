@@ -57,10 +57,10 @@ class ThreadPool final
         {
             std::scoped_lock lock(mutex_);
             tasks_.emplace_back([task]() { (*task)(); });
-            std::atomic_fetch_add(&taskCounter_, 1);
         }
 
-        cv_.notify_all();
+        std::atomic_fetch_add(&taskCounter_, 1);
+        cv_.notify_one();
 
         return future;
     }
