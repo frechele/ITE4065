@@ -51,7 +51,7 @@ class Operator
     /// The result size
     uint64_t resultSize = 0;
     /// The destructor
-    virtual ~Operator(){};
+    virtual ~Operator() noexcept = default;
 };
 //---------------------------------------------------------------------------
 class Scan : public Operator
@@ -71,7 +71,7 @@ class Scan : public Operator
     /// Run
     void run() override;
     /// Get  materialized results
-    virtual std::vector<uint64_t*> getResults() override;
+    std::vector<uint64_t*> getResults() override;
 };
 //---------------------------------------------------------------------------
 class FilterScan : public Scan
@@ -97,7 +97,7 @@ class FilterScan : public Scan
     /// Run
     void run() override;
     /// Get  materialized results
-    virtual std::vector<uint64_t*> getResults() override
+    std::vector<uint64_t*> getResults() override
     {
         return Operator::getResults();
     }
