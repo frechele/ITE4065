@@ -110,7 +110,7 @@ class ThreadPool final
 
 template <class IndexT, typename Func>
 inline void parallel_for_nonblock(IndexT begin, IndexT end, Func&& f,
-                                  unsigned minBlockSize = 64, unsigned numWorkers = 0)
+                                  unsigned minBlockSize = 1, unsigned numWorkers = 0)
 {
     const IndexT totalSize = end - begin;
     numWorkers = numWorkers == 0 ? ThreadPool::GetNumWorkers() : numWorkers;
