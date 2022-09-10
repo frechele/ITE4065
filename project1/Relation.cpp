@@ -4,6 +4,8 @@
 #include <sys/stat.h>
 #include <fstream>
 #include <iostream>
+
+#include <ThreadPool.hpp>
 //---------------------------------------------------------------------------
 using namespace std;
 //---------------------------------------------------------------------------
@@ -90,11 +92,14 @@ void Relation::loadRelation(const char* fileName)
     addr += sizeof(size);
     auto numColumns = *reinterpret_cast<size_t*>(addr);
     addr += sizeof(size_t);
-    for (unsigned i = 0; i < numColumns; ++i)
-    {
-        this->columns.push_back(reinterpret_cast<uint64_t*>(addr));
-        addr += size * sizeof(uint64_t);
-    }
+
+    this->columns.resize(numColumns);
+    parallel_for(0lu, numColumns, [this, addr](size_t begin, size_t end) {
+        for (size_t i = begin; i < end; ++i)
+        {
+            this->columns[i] = reinterpret_cast<uint64_t*>(addr + size * i * sizeof(uint64_t));
+        }
+    });
 }
 //---------------------------------------------------------------------------
 Relation::Relation(const char* fileName) : ownsMemory(false)
