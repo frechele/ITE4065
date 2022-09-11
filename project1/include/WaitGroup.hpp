@@ -15,11 +15,10 @@ class WaitGroup final
         return std::make_shared<WaitGroup>();
     }
 
+ public:
     WaitGroup(int count = 0) : counter_(count)
     {
     }
-
-    WaitGroup& operator=(WaitGroup&&) = default;
 
     void Done()
     {
