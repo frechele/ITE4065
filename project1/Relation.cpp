@@ -94,11 +94,9 @@ void Relation::loadRelation(const char* fileName)
     addr += sizeof(size_t);
 
     this->columns.resize(numColumns);
-    parallel_for(0lu, numColumns, [this, addr](size_t begin, size_t end) {
-        for (size_t i = begin; i < end; ++i)
-        {
-            this->columns[i] = reinterpret_cast<uint64_t*>(addr + size * i * sizeof(uint64_t));
-        }
+    parallel_for(0lu, numColumns, [this, addr](size_t i) {
+        this->columns[i] =
+            reinterpret_cast<uint64_t*>(addr + size * i * sizeof(uint64_t));
     });
 }
 //---------------------------------------------------------------------------

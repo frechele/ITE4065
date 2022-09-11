@@ -136,7 +136,8 @@ inline WaitGroup::Ptr parallel_for_nonblock(IndexT begin, IndexT end, Func&& f,
 
     if (numBlocks <= 1)
     {
-        f(begin, end);
+        for (IndexT i = begin; i < end; ++i)
+            f(i);
         return WaitGroup::ZeroGroup();
     }
 
@@ -150,8 +151,10 @@ inline WaitGroup::Ptr parallel_for_nonblock(IndexT begin, IndexT end, Func&& f,
         const auto blockEnd =
             (blockID == numBlocks - 1) ? end : blockBegin + blockSize;
 
-        ThreadPool::Get().BulkPushTask(
-            wg, [blockBegin, blockEnd, f]() { f(blockBegin, blockEnd); });
+        ThreadPool::Get().BulkPushTask(wg, [blockBegin, blockEnd, f]() {
+            for (IndexT i = blockBegin; i < blockEnd; ++i)
+                f(i);
+        });
     }
 
     ThreadPool::Get().BulkEnd();
@@ -163,8 +166,8 @@ template <class IndexT, typename Func>
 inline void parallel_for(IndexT begin, IndexT end, Func&& f,
                          unsigned minBlockSize = 64, unsigned numWorkers = 0)
 {
-    auto wg = parallel_for_nonblock(begin, end, std::forward<Func>(f), minBlockSize,
-                          numWorkers);
+    auto wg = parallel_for_nonblock(begin, end, std::forward<Func>(f),
+                                    minBlockSize, numWorkers);
 
     wg->Wait();
 }

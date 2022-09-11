@@ -1,5 +1,6 @@
 #include <Operators.hpp>
 #include <cassert>
+#include <future>
 #include <iostream>
 
 #include <ThreadPool.hpp>
@@ -56,7 +57,8 @@ bool FilterScan::require(SelectInfo info)
 void FilterScan::copy2Result(uint64_t id)
 // Copy to result
 {
-    for (unsigned cId = 0; cId < inputData.size(); ++cId)
+    const unsigned inputDataSize = inputData.size();
+    for (unsigned cId = 0; cId < inputDataSize; ++cId)
         tmpResults[cId].push_back(inputData[cId][id]);
     ++resultSize;
 }
@@ -152,8 +154,12 @@ void Join::run()
 {
     left->require(pInfo.left);
     right->require(pInfo.right);
-    left->run();
-    right->run();
+
+    auto leftTask = std::async([this] { left->run(); });
+    auto rightTask = std::async([this] { right->run(); });
+
+    leftTask.wait();
+    rightTask.wait();
 
     // Use smaller input for build
     if (left->resultSize > right->resultSize)
@@ -278,12 +284,8 @@ void SelfJoin::run()
         tmpResults[cId].resize(numOfIds);
     }
 
-    parallel_for(0u, numOfIds, [this, &Ids](unsigned begin, unsigned end) {
-        for (unsigned i = begin; i < end; ++i)
-        {
-            copy2Result(i, Ids[i]);
-        }
-    });
+    parallel_for(0u, numOfIds,
+                 [this, &Ids](unsigned i) { copy2Result(i, Ids[i]); });
 }
 //---------------------------------------------------------------------------
 void Checksum::run()
@@ -301,21 +303,17 @@ void Checksum::run()
 
     resultSize = input->resultSize;
 
-    parallel_for(
-        0u, colInfoSize, [this, &results](unsigned begin, unsigned end) {
-            for (unsigned i = begin; i < end; ++i)
-            {
-                auto& sInfo = colInfo[i];
-                auto colId = input->resolve(sInfo);
-                auto resultCol = results[colId];
+    parallel_for(0u, colInfoSize, [this, &results](unsigned i) {
+        auto& sInfo = colInfo[i];
+        auto colId = input->resolve(sInfo);
+        auto resultCol = results[colId];
 
-                uint64_t sum = 0;
-                for (auto iter = resultCol, limit = iter + input->resultSize;
-                     iter != limit; ++iter)
-                    sum += *iter;
+        uint64_t sum = 0;
+        for (auto iter = resultCol, limit = iter + input->resultSize;
+             iter != limit; ++iter)
+            sum += *iter;
 
-                checkSums[i] = sum;
-            }
-        });
+        checkSums[i] = sum;
+    });
 }
 //---------------------------------------------------------------------------
