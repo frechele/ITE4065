@@ -7,7 +7,10 @@
 #include <mutex>
 #include <queue>
 #include <thread>
+#include <utility>
 #include <vector>
+
+#include <WaitGroup.hpp>
 
 class ThreadPool final
 {
@@ -45,25 +48,45 @@ class ThreadPool final
         return *instance_;
     }
 
-    void WaitAll()
+    template <typename Func, typename... Args>
+    WaitGroup::Ptr PushTask(Func&& f, Args&&... args)
     {
-        std::unique_lock lock(waitMutex_);
-        waitCv_.wait(lock, [this]() { return taskCounter_ == 0; });
+        auto task =
+            std::bind(std::forward<Func>(f), std::forward<Args>(args)...);
+        auto wg = std::make_shared<WaitGroup>(1);
+
+        {
+            std::scoped_lock lock(mutex_);
+            tasks_.emplace(std::make_pair(wg, task));
+        }
+
+        cv_.notify_one();
+
+        return wg;
+    }
+
+    WaitGroup::Ptr BulkBegin(int jobCount)
+    {
+        auto wg = std::make_shared<WaitGroup>(jobCount);
+
+        mutex_.lock();
+
+        return wg;
     }
 
     template <typename Func, typename... Args>
-    void PushTask(Func&& f, Args&&... args)
+    void BulkPushTask(WaitGroup::Ptr wg, Func&& f, Args&&... args)
     {
         auto task =
             std::bind(std::forward<Func>(f), std::forward<Args>(args)...);
 
-        {
-            std::scoped_lock lock(mutex_);
-            tasks_.emplace(task);
-        }
+        tasks_.emplace(std::make_pair(wg, task));
+    }
 
-        std::atomic_fetch_add(&taskCounter_, 1);
-        cv_.notify_one();
+    void BulkEnd()
+    {
+        mutex_.unlock();
+        cv_.notify_all();
     }
 
  private:
@@ -71,7 +94,7 @@ class ThreadPool final
     {
         while (true)
         {
-            std::function<void()> task;
+            std::pair<WaitGroup::Ptr, std::function<void()>> taskInfo;
 
             {
                 std::unique_lock lock(mutex_);
@@ -79,53 +102,47 @@ class ThreadPool final
                 if (tasks_.empty() && !running_)
                     break;
 
-                task = std::move(tasks_.front());
+                taskInfo = std::move(tasks_.front());
                 tasks_.pop();
             }
 
-            task();
-            std::atomic_fetch_sub(&taskCounter_, 1);
-
-            if (taskCounter_ == 0)
-                waitCv_.notify_all();
+            taskInfo.second();
+            taskInfo.first->Done();
         }
     }
 
  private:
     std::vector<std::thread> workers_;
-    std::queue<std::function<void()>> tasks_;
+    std::queue<std::pair<WaitGroup::Ptr, std::function<void()>>> tasks_;
 
     // Thread control variables
     bool running_{ true };
     std::mutex mutex_;
     std::condition_variable cv_;
 
-    // Waiting task variables
-    std::atomic<int> taskCounter_{ 0 };
-    std::mutex waitMutex_;
-    std::condition_variable waitCv_;
-
     inline static ThreadPool* instance_{ nullptr };
 };
 
 template <class IndexT, typename Func>
-inline void parallel_for_nonblock(IndexT begin, IndexT end, Func&& f,
-                                  unsigned minBlockSize = 1, unsigned numWorkers = 0)
+inline WaitGroup::Ptr parallel_for_nonblock(IndexT begin, IndexT end, Func&& f,
+                                            unsigned minBlockSize = 1,
+                                            unsigned numWorkers = 0)
 {
     const IndexT totalSize = end - begin;
     numWorkers = numWorkers == 0 ? ThreadPool::GetNumWorkers() : numWorkers;
 
     const unsigned desiredNumBlocks = totalSize / minBlockSize;
-    const unsigned numBlocks =
-        std::min(desiredNumBlocks, numWorkers);
+    const unsigned numBlocks = std::min(desiredNumBlocks, numWorkers);
 
     if (numBlocks <= 1)
     {
         f(begin, end);
-        return;
+        return WaitGroup::ZeroGroup();
     }
 
     const unsigned blockSize = totalSize / numBlocks;
+
+    auto wg = ThreadPool::Get().BulkBegin(numBlocks);
 
     for (IndexT blockID = 0; blockID < numBlocks; ++blockID)
     {
@@ -133,15 +150,21 @@ inline void parallel_for_nonblock(IndexT begin, IndexT end, Func&& f,
         const auto blockEnd =
             (blockID == numBlocks - 1) ? end : blockBegin + blockSize;
 
-        ThreadPool::Get().PushTask(
-            [blockBegin, blockEnd, f]() { f(blockBegin, blockEnd); });
+        ThreadPool::Get().BulkPushTask(
+            wg, [blockBegin, blockEnd, f]() { f(blockBegin, blockEnd); });
     }
+
+    ThreadPool::Get().BulkEnd();
+
+    return wg;
 }
 
 template <class IndexT, typename Func>
-inline void parallel_for(IndexT begin, IndexT end, Func&& f, unsigned minBlockSize = 64, unsigned numWorkers = 0)
+inline void parallel_for(IndexT begin, IndexT end, Func&& f,
+                         unsigned minBlockSize = 64, unsigned numWorkers = 0)
 {
-    parallel_for_nonblock(begin, end, std::forward<Func>(f), minBlockSize, numWorkers);
+    auto wg = parallel_for_nonblock(begin, end, std::forward<Func>(f), minBlockSize,
+                          numWorkers);
 
-    ThreadPool::Get().WaitAll();
+    wg->Wait();
 }
