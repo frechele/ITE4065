@@ -1,0 +1,129 @@
+#pragma once
+
+#include <cassert>
+#include <condition_variable>
+#include <deque>
+#include <functional>
+#include <future>
+#include <thread>
+#include <vector>
+
+using TaskFuture = std::future<void>;
+
+class ThreadPool final
+{
+ public:
+    static ThreadPool& Get()
+    {
+        return *instance_;
+    }
+
+ public:
+    const int NWORKER;
+
+    ThreadPool() : NWORKER(std::thread::hardware_concurrency())
+    {
+        assert(instance_ == nullptr);
+        instance_ = this;
+
+        createWorkers();
+    }
+
+    ~ThreadPool() noexcept
+    {
+        assert(instance_ == this);
+
+        destroyWorkers();
+        instance_ = nullptr;
+    }
+
+    template <typename Func, typename... Args>
+    TaskFuture Submit(Func&& f, Args&&... args)
+    {
+        auto task = std::make_shared<std::packaged_task<void()>>(
+            std::bind(std::forward<Func>(f), std::forward<Args>(args)...));
+
+        auto future = task->get_future();
+
+        {
+            std::scoped_lock lock(mutex_);
+            tasks_.emplace_back([task]() { (*task)(); });
+        }
+
+        return future;
+    }
+
+ private:
+    void createWorkers()
+    {
+        running_ = true;
+
+        for (int i = 0; i < NWORKER; ++i)
+        {
+            workers_.emplace_back(&ThreadPool::workerThread, this);
+        }
+    }
+
+    void destroyWorkers()
+    {
+        running_ = false;
+        cv_.notify_all();
+
+        for (auto& worker : workers_)
+            if (worker.joinable())
+                worker.join();
+    }
+
+    void workerThread()
+    {
+        while (true)
+        {
+            std::packaged_task<void()> task;
+
+            {
+                std::unique_lock lock(mutex_);
+                cv_.wait(lock, [this] { return !running_ || !tasks_.empty(); });
+
+                if (!running_ && tasks_.empty())
+                    break;
+
+                task = std::move(tasks_.front());
+                tasks_.pop_front();
+            }
+
+            task();
+        }
+    }
+
+ private:
+    inline static ThreadPool* instance_{ nullptr };
+
+    std::vector<std::thread> workers_;
+    std::deque<std::packaged_task<void()>> tasks_;
+
+    // thread pool controllers
+    bool running_{ false };
+    std::mutex mutex_;
+    std::condition_variable cv_;
+};
+
+template <class IndexT, typename Func, typename... Args>
+void parallel_for(IndexT begin, IndexT end, Func&& f, Args&&... args)
+{
+    const unsigned workSize = end - begin;
+    const unsigned nWorker = ThreadPool::Get().NWORKER;
+    const unsigned blockSize = workSize / nWorker;
+
+    std::vector<TaskFuture> futures(nWorker);
+    for (unsigned blockID = 0; blockID < blockSize; ++blockID)
+    {
+        const unsigned blockBegin = begin + blockID * blockSize;
+        const unsigned blockEnd =
+            (blockID == blockSize - 1) ? end : blockBegin + blockSize;
+
+        futures[blockID] = ThreadPool::Get().Submit(f, blockBegin, blockEnd);
+    }
+
+    for (auto& future : futures)
+        future.wait();
+}
