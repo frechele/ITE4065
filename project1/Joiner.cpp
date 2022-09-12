@@ -84,14 +84,12 @@ string Joiner::join(QueryInfo& query)
     unique_ptr<Operator> root =
         make_unique<Join>(move(left), move(right), firstJoin);
 
-    const unsigned numOfPredicates = query.predicates.size();
-    for (unsigned i = 1; i < numOfPredicates; ++i)
+    for (unsigned i = 1; i < query.predicates.size(); ++i)
     {
         auto& pInfo = query.predicates[i];
         auto& leftInfo = pInfo.left;
         auto& rightInfo = pInfo.right;
         unique_ptr<Operator> left, right;
-
         switch (analyzeInputOfJoin(usedRelations, leftInfo, rightInfo))
         {
             case QueryGraphProvides::Left:
@@ -99,20 +97,17 @@ string Joiner::join(QueryInfo& query)
                 right = addScan(usedRelations, rightInfo, query);
                 root = make_unique<Join>(move(left), move(right), pInfo);
                 break;
-
             case QueryGraphProvides::Right:
                 left = addScan(usedRelations, leftInfo, query);
                 right = move(root);
                 root = make_unique<Join>(move(left), move(right), pInfo);
                 break;
-
             case QueryGraphProvides::Both:
                 // All relations of this join are already used somewhere else in
                 // the query. Thus, we have either a cycle in our join graph or
                 // more than one join predicate per join.
                 root = make_unique<SelfJoin>(move(root), pInfo);
                 break;
-
             case QueryGraphProvides::None:
                 // Process this predicate later when we can connect it to the
                 // other joins We never have cross products
@@ -126,8 +121,7 @@ string Joiner::join(QueryInfo& query)
 
     stringstream out;
     auto& results = checkSum.checkSums;
-    const unsigned numOfResults = results.size();
-    for (unsigned i = 0; i < numOfResults; ++i)
+    for (unsigned i = 0; i < results.size(); ++i)
     {
         out << (checkSum.resultSize == 0 ? "NULL" : to_string(results[i]));
         if (i < results.size() - 1)

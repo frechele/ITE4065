@@ -1,9 +1,6 @@
 #include <Operators.hpp>
 #include <cassert>
-#include <future>
 #include <iostream>
-
-#include <ThreadPool.hpp>
 //---------------------------------------------------------------------------
 using namespace std;
 //---------------------------------------------------------------------------
@@ -12,12 +9,9 @@ bool Scan::require(SelectInfo info)
 {
     if (info.binding != relationBinding)
         return false;
-
     assert(info.colId < relation.columns.size());
-
     resultColumns.push_back(relation.columns[info.colId]);
     select2ResultColId[info] = resultColumns.size() - 1;
-
     return true;
 }
 //---------------------------------------------------------------------------
@@ -39,9 +33,7 @@ bool FilterScan::require(SelectInfo info)
 {
     if (info.binding != relationBinding)
         return false;
-
     assert(info.colId < relation.columns.size());
-
     if (select2ResultColId.find(info) == select2ResultColId.end())
     {
         // Add to results
@@ -50,15 +42,13 @@ bool FilterScan::require(SelectInfo info)
         unsigned colId = tmpResults.size() - 1;
         select2ResultColId[info] = colId;
     }
-
     return true;
 }
 //---------------------------------------------------------------------------
 void FilterScan::copy2Result(uint64_t id)
 // Copy to result
 {
-    const unsigned inputDataSize = inputData.size();
-    for (unsigned cId = 0; cId < inputDataSize; ++cId)
+    for (unsigned cId = 0; cId < inputData.size(); ++cId)
         tmpResults[cId].push_back(inputData[cId][id]);
     ++resultSize;
 }
@@ -77,7 +67,6 @@ bool FilterScan::applyFilter(uint64_t i, FilterInfo& f)
         case FilterInfo::Comparison::Less:
             return compareCol[i] < constant;
     };
-
     return false;
 }
 //---------------------------------------------------------------------------
@@ -91,7 +80,6 @@ void FilterScan::run()
         {
             pass &= applyFilter(i, f);
         }
-
         if (pass)
             copy2Result(i);
     }
@@ -101,12 +89,10 @@ vector<uint64_t*> Operator::getResults()
 // Get materialized results
 {
     vector<uint64_t*> resultVector;
-
     for (auto& c : tmpResults)
     {
         resultVector.push_back(c.data());
     }
-
     return resultVector;
 }
 //---------------------------------------------------------------------------
@@ -139,12 +125,10 @@ void Join::copy2Result(uint64_t leftId, uint64_t rightId)
 // Copy to result
 {
     unsigned relColId = 0;
-    const unsigned copyLeftDataSize = copyLeftData.size();
-    for (unsigned cId = 0; cId < copyLeftDataSize; ++cId)
+    for (unsigned cId = 0; cId < copyLeftData.size(); ++cId)
         tmpResults[relColId++].push_back(copyLeftData[cId][leftId]);
 
-    const unsigned copyRightDataSize = copyRightData.size();
-    for (unsigned cId = 0; cId < copyRightDataSize; ++cId)
+    for (unsigned cId = 0; cId < copyRightData.size(); ++cId)
         tmpResults[relColId++].push_back(copyRightData[cId][rightId]);
     ++resultSize;
 }
@@ -154,12 +138,8 @@ void Join::run()
 {
     left->require(pInfo.left);
     right->require(pInfo.right);
-
-    auto leftTask = std::async([this] { left->run(); });
-    auto rightTask = std::async([this] { right->run(); });
-
-    leftTask.wait();
-    rightTask.wait();
+    left->run();
+    right->run();
 
     // Use smaller input for build
     if (left->resultSize > right->resultSize)
@@ -174,28 +154,15 @@ void Join::run()
 
     // Resolve the input columns
     unsigned resColId = 0;
-
-    const unsigned requestedLeftSize = requestedColumnsLeft.size();
-    const unsigned requestedRightSize = requestedColumnsRight.size();
-
-    if (requestedLeftSize)
+    for (auto& info : requestedColumnsLeft)
     {
-        copyLeftData.reserve(requestedLeftSize);
-        for (auto& info : requestedColumnsLeft)
-        {
-            copyLeftData.push_back(leftInputData[left->resolve(info)]);
-            select2ResultColId[info] = resColId++;
-        }
+        copyLeftData.push_back(leftInputData[left->resolve(info)]);
+        select2ResultColId[info] = resColId++;
     }
-
-    if (requestedRightSize)
+    for (auto& info : requestedColumnsRight)
     {
-        copyRightData.reserve(requestedRightSize);
-        for (auto& info : requestedColumnsRight)
-        {
-            copyRightData.push_back(rightInputData[right->resolve(info)]);
-            select2ResultColId[info] = resColId++;
-        }
+        copyRightData.push_back(rightInputData[right->resolve(info)]);
+        select2ResultColId[info] = resColId++;
     }
 
     auto leftColId = left->resolve(pInfo.left);
@@ -221,12 +188,12 @@ void Join::run()
     }
 }
 //---------------------------------------------------------------------------
-void SelfJoin::copy2Result(int rank, uint64_t id)
+void SelfJoin::copy2Result(uint64_t id)
 // Copy to result
 {
-    const unsigned copyDataSize = copyData.size();
-    for (unsigned cId = 0; cId < copyDataSize; ++cId)
-        tmpResults[cId][rank] = copyData[cId][id];
+    for (unsigned cId = 0; cId < copyData.size(); ++cId)
+        tmpResults[cId].push_back(copyData[cId][id]);
+    ++resultSize;
 }
 //---------------------------------------------------------------------------
 bool SelfJoin::require(SelectInfo info)
@@ -234,7 +201,6 @@ bool SelfJoin::require(SelectInfo info)
 {
     if (requiredIUs.count(info))
         return true;
-
     if (input->require(info))
     {
         tmpResults.emplace_back();
@@ -264,28 +230,11 @@ void SelfJoin::run()
 
     auto leftCol = inputData[leftColId];
     auto rightCol = inputData[rightColId];
-
-    std::vector<uint64_t> Ids;
-    Ids.reserve(input->resultSize);
-
     for (uint64_t i = 0; i < input->resultSize; ++i)
     {
         if (leftCol[i] == rightCol[i])
-        {
-            Ids.push_back(i);
-            ++resultSize;
-        }
+            copy2Result(i);
     }
-
-    const unsigned numOfIds = Ids.size();
-    const unsigned copyDataSize = copyData.size();
-    for (unsigned cId = 0; cId < copyDataSize; ++cId)
-    {
-        tmpResults[cId].resize(numOfIds);
-    }
-
-    parallel_for(0u, numOfIds,
-                 [this, &Ids](unsigned i) { copy2Result(i, Ids[i]); });
 }
 //---------------------------------------------------------------------------
 void Checksum::run()
@@ -298,22 +247,16 @@ void Checksum::run()
     input->run();
     auto results = input->getResults();
 
-    unsigned colInfoSize = colInfo.size();
-    checkSums.resize(colInfoSize);
-
-    resultSize = input->resultSize;
-
-    parallel_for(0u, colInfoSize, [this, &results](unsigned i) {
-        auto& sInfo = colInfo[i];
+    for (auto& sInfo : colInfo)
+    {
         auto colId = input->resolve(sInfo);
         auto resultCol = results[colId];
-
         uint64_t sum = 0;
+        resultSize = input->resultSize;
         for (auto iter = resultCol, limit = iter + input->resultSize;
              iter != limit; ++iter)
             sum += *iter;
-
-        checkSums[i] = sum;
-    });
+        checkSums.push_back(sum);
+    }
 }
 //---------------------------------------------------------------------------

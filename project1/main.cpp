@@ -1,14 +1,11 @@
 #include <iostream>
 #include "Joiner.hpp"
 #include "Parser.hpp"
-#include "ThreadPool.hpp"
 
 using namespace std;
 //---------------------------------------------------------------------------
 int main(int argc, char* argv[])
 {
-    ThreadPool threadPool;
-
     Joiner joiner;
     // Read join relations
     string line;
