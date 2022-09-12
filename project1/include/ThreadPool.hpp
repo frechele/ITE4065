@@ -50,6 +50,8 @@ class ThreadPool final
             tasks_.emplace_back([task]() { (*task)(); });
         }
 
+        cv_.notify_one();
+
         return future;
     }
 
