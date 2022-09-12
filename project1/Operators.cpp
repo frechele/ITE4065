@@ -1,6 +1,8 @@
 #include <Operators.hpp>
 #include <cassert>
 #include <iostream>
+
+#include <ThreadPool.hpp>
 //---------------------------------------------------------------------------
 using namespace std;
 //---------------------------------------------------------------------------
@@ -138,6 +140,7 @@ void Join::run()
 {
     left->require(pInfo.left);
     right->require(pInfo.right);
+
     left->run();
     right->run();
 
@@ -175,17 +178,52 @@ void Join::run()
     {
         hashTable.emplace(leftKeyColumn[i], i);
     }
+
     // Probe phase
+
+    unsigned blockSize, blockCount;
+    get_parallel_size(0ul, right->resultSize, blockCount, blockSize);
+
+    std::vector<uint64_t> subResultSizes(blockCount);
+    std::vector<std::vector<std::vector<uint64_t>>> subResults(blockCount);
+    for (auto& subResult : subResults)
+        subResult.resize(tmpResults.size());
+
     auto rightKeyColumn = rightInputData[rightColId];
-    for (uint64_t i = 0, limit = i + right->resultSize; i != limit; ++i)
+    parallel_for(
+        0ul, right->resultSize,
+        [this, &rightKeyColumn, &subResults, &subResultSizes](
+            unsigned rank, uint64_t begin, uint64_t end) {
+            for (uint64_t i = begin; i < end; ++i)
+            {
+                auto rightKey = rightKeyColumn[i];
+                auto range = hashTable.equal_range(rightKey);
+
+                auto& subResult = subResults[rank];
+                for (auto iter = range.first; iter != range.second; ++iter)
+                {
+                    unsigned relColId = 0;
+                    for (unsigned cId = 0; cId < copyLeftData.size(); ++cId)
+                        subResult[relColId++].push_back(
+                            copyLeftData[cId][iter->second]);
+
+                    for (unsigned cId = 0; cId < copyRightData.size(); ++cId)
+                        subResult[relColId++].push_back(copyRightData[cId][i]);
+                    ++subResultSizes[rank];
+                }
+            }
+        });
+
+    for (auto& subResult : subResults)
     {
-        auto rightKey = rightKeyColumn[i];
-        auto range = hashTable.equal_range(rightKey);
-        for (auto iter = range.first; iter != range.second; ++iter)
-        {
-            copy2Result(iter->second, i);
-        }
+        const unsigned totalSize = tmpResults.size();
+        for (unsigned i = 0; i < totalSize; ++i)
+            tmpResults[i].insert(end(tmpResults[i]), begin(subResult[i]),
+                                 end(subResult[i]));
     }
+
+    for (auto size : subResultSizes)
+        resultSize += size;
 }
 //---------------------------------------------------------------------------
 void SelfJoin::copy2Result(uint64_t id)

@@ -109,21 +109,35 @@ class ThreadPool final
     std::condition_variable cv_;
 };
 
+template <class IndexT>
+void get_parallel_size(IndexT begin, IndexT end, unsigned& blockCount, unsigned& blockSize)
+{
+    const unsigned workSize = end - begin;
+    blockCount = ThreadPool::Get().NWORKER;
+    blockSize = workSize / blockCount;
+
+    if (blockSize == 0)
+    {
+        blockSize = 1;
+        blockCount = workSize;
+    }
+}
+
+
 template <class IndexT, typename Func, typename... Args>
 void parallel_for(IndexT begin, IndexT end, Func&& f, Args&&... args)
 {
-    const unsigned workSize = end - begin;
-    const unsigned nWorker = ThreadPool::Get().NWORKER;
-    const unsigned blockSize = workSize / nWorker;
+    unsigned blockCount, blockSize;
+    get_parallel_size(begin, end, blockCount, blockSize);
 
-    std::vector<TaskFuture> futures(nWorker);
-    for (unsigned blockID = 0; blockID < blockSize; ++blockID)
+    std::vector<TaskFuture> futures(blockCount);
+    for (unsigned blockID = 0; blockID < blockCount; ++blockID)
     {
         const unsigned blockBegin = begin + blockID * blockSize;
         const unsigned blockEnd =
-            (blockID == blockSize - 1) ? end : blockBegin + blockSize;
+            (blockID == blockCount - 1) ? end : blockBegin + blockSize;
 
-        futures[blockID] = ThreadPool::Get().Submit(f, blockBegin, blockEnd);
+        futures[blockID] = ThreadPool::Get().Submit(f, blockID, blockBegin, blockEnd);
     }
 
     for (auto& future : futures)
