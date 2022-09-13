@@ -218,13 +218,15 @@ void Join::run()
             std::atomic_fetch_add(&atmResultSize, localResultSize);
         });
 
-    for (auto& subResult : subResults)
+    for (const auto& subResult : subResults)
     {
         const unsigned totalSize = tmpResults.size();
         for (unsigned i = 0; i < totalSize; ++i)
             tmpResults[i].insert(end(tmpResults[i]), begin(subResult[i]),
                                  end(subResult[i]));
     }
+
+    resultSize = atmResultSize.load();
 }
 //---------------------------------------------------------------------------
 void SelfJoin::copy2Result(uint64_t id)
@@ -267,13 +269,42 @@ void SelfJoin::run()
     auto leftColId = input->resolve(pInfo.left);
     auto rightColId = input->resolve(pInfo.right);
 
+    unsigned blockSize, blockCount;
+    get_parallel_size(0ul, input->resultSize, blockCount, blockSize);
+
+    std::atomic<uint64_t> atmResultSize = 0;
+    std::vector<std::vector<std::vector<uint64_t>>> subResults(blockCount);
+    for (auto& subResult : subResults)
+        subResult.resize(tmpResults.size());
+
     auto leftCol = inputData[leftColId];
     auto rightCol = inputData[rightColId];
-    for (uint64_t i = 0; i < input->resultSize; ++i)
+    parallel_for(
+        0ul, input->resultSize,
+        [this, &leftCol, &rightCol, &atmResultSize, &subResults](
+            unsigned rank, uint64_t begin, uint64_t end) {
+            uint64_t localResultSize = 0;
+            for (uint64_t i = begin; i < end; ++i)
+            {
+                if (leftCol[i] == rightCol[i])
+                {
+                    for (unsigned cId = 0; cId < copyData.size(); ++cId)
+                        subResults[rank][cId].push_back(copyData[cId][i]);
+                    ++localResultSize;
+                }
+            }
+            std::atomic_fetch_add(&atmResultSize, localResultSize);
+        });
+
+    for (const auto& subResult : subResults)
     {
-        if (leftCol[i] == rightCol[i])
-            copy2Result(i);
+        const unsigned totalSize = tmpResults.size();
+        for (unsigned i = 0; i < totalSize; ++i)
+            tmpResults[i].insert(end(tmpResults[i]), begin(subResult[i]),
+                                 end(subResult[i]));
     }
+
+    resultSize = atmResultSize.load();
 }
 //---------------------------------------------------------------------------
 void Checksum::run()
