@@ -21,7 +21,7 @@ class ThreadPool final
  public:
     const int NWORKER;
 
-    ThreadPool() : NWORKER(std::thread::hardware_concurrency())
+    ThreadPool() : NWORKER(std::thread::hardware_concurrency() * 2)
     {
         assert(instance_ == nullptr);
         instance_ = this;
