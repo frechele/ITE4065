@@ -1,4 +1,6 @@
 #include <Operators.hpp>
+
+#include <atomic>
 #include <cassert>
 #include <iostream>
 
@@ -184,7 +186,7 @@ void Join::run()
     unsigned blockSize, blockCount;
     get_parallel_size(0ul, right->resultSize, blockCount, blockSize);
 
-    std::vector<uint64_t> subResultSizes(blockCount);
+    std::atomic<uint64_t> atmResultSize = 0;
     std::vector<std::vector<std::vector<uint64_t>>> subResults(blockCount);
     for (auto& subResult : subResults)
         subResult.resize(tmpResults.size());
@@ -192,8 +194,9 @@ void Join::run()
     auto rightKeyColumn = rightInputData[rightColId];
     parallel_for(
         0ul, right->resultSize,
-        [this, &rightKeyColumn, &subResults, &subResultSizes](
+        [this, &rightKeyColumn, &subResults, &atmResultSize](
             unsigned rank, uint64_t begin, uint64_t end) {
+            uint64_t localResultSize = 0;
             for (uint64_t i = begin; i < end; ++i)
             {
                 auto rightKey = rightKeyColumn[i];
@@ -209,9 +212,10 @@ void Join::run()
 
                     for (unsigned cId = 0; cId < copyRightData.size(); ++cId)
                         subResult[relColId++].push_back(copyRightData[cId][i]);
-                    ++subResultSizes[rank];
+                    ++localResultSize;
                 }
             }
+            std::atomic_fetch_add(&atmResultSize, localResultSize);
         });
 
     for (auto& subResult : subResults)
@@ -221,9 +225,6 @@ void Join::run()
             tmpResults[i].insert(end(tmpResults[i]), begin(subResult[i]),
                                  end(subResult[i]));
     }
-
-    for (auto size : subResultSizes)
-        resultSize += size;
 }
 //---------------------------------------------------------------------------
 void SelfJoin::copy2Result(uint64_t id)
