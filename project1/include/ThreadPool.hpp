@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cassert>
+#include <cstdint>
 #include <condition_variable>
 #include <deque>
 #include <functional>
@@ -109,44 +110,59 @@ class ThreadPool final
     std::condition_variable cv_;
 };
 
-template <class IndexT>
-void get_parallel_size(IndexT begin, IndexT end, unsigned& blockCount, unsigned& blockSize, unsigned minimumBlockSize = 1024)
+struct BlockInfo final
 {
-    const unsigned workSize = end - begin;
-
-    blockCount = ThreadPool::Get().NWORKER;
-    blockSize = workSize / blockCount;
-
-    if (blockSize < minimumBlockSize)
+    BlockInfo(std::uint64_t begin_, std::uint64_t end_, unsigned minimumBlockSize = 1024)
+        : begin(begin_), end(end_), workSize(end - begin)
     {
-        blockSize = std::min(minimumBlockSize, workSize);
-        blockCount = workSize / blockSize;
+        assert(begin <= end);
+        assert(minimumBlockSize > 0);
+
+        blockCount = ThreadPool::Get().NWORKER;
+        blockSize = workSize / blockCount;
+
+        if (blockSize < minimumBlockSize)
+        {
+            blockCount = workSize / minimumBlockSize;
+            blockSize = minimumBlockSize;
+        }
+
+        if (blockCount == 0)
+        {
+            blockCount = 1;
+            blockSize = workSize;
+        }
     }
 
-    if (blockSize == 0)
-    {
-        blockSize = 1;
-        blockCount = workSize;
-    }
-}
+    const std::uint64_t begin;
+    const std::uint64_t end;
+    const unsigned workSize;
 
+    unsigned blockCount;
+    unsigned blockSize;
+};
 
-template <class IndexT, typename Func, typename... Args>
-void parallel_for(IndexT begin, IndexT end, Func&& f, Args&&... args)
+template <typename Func, typename... Args>
+void parallel_for(const BlockInfo& bi, Func&& f, Args&&... args)
 {
-    unsigned blockCount, blockSize;
-    get_parallel_size(begin, end, blockCount, blockSize);
-
-    std::vector<TaskFuture> futures(blockCount);
-    for (unsigned blockID = 0; blockID < blockCount; ++blockID)
+    std::vector<TaskFuture> futures(bi.blockCount);
+    for (unsigned blockID = 0; blockID < bi.blockCount; ++blockID)
     {
-        const unsigned blockBegin = begin + blockID * blockSize;
+        const unsigned blockBegin = bi.begin + blockID * bi.blockSize;
         const unsigned blockEnd =
-            (blockID == blockCount - 1) ? end : blockBegin + blockSize;
+            (blockID == bi.blockCount - 1) ? bi.end : blockBegin + bi.blockSize;
 
-        futures[blockID] = ThreadPool::Get().Submit(f, blockID, blockBegin, blockEnd);
+        futures[blockID] =
+            ThreadPool::Get().Submit(f, blockID, blockBegin, blockEnd);
     }
 
     for (auto& future : futures)
         future.wait();
+}
+
+template <typename Func, typename... Args>
+void parallel_for(std::uint64_t begin, std::uint64_t end, Func&& f, Args&&... args)
+{
+    BlockInfo info(begin, end);
+    parallel_for(info, std::forward<Func>(f), std::forward<Args>(args)...);
 }
