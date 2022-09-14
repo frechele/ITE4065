@@ -1,4 +1,8 @@
 #include <iostream>
+#include <memory>
+#include <mutex>
+#include <vector>
+
 #include "Joiner.hpp"
 #include "Parser.hpp"
 
@@ -9,6 +13,9 @@ using namespace std;
 int main(int argc, char* argv[])
 {
     ThreadPool pool;
+    pool.SetAsMainPool();
+
+    ThreadPool batchTP(20);
 
     Joiner joiner;
     // Read join relations
@@ -22,13 +29,35 @@ int main(int argc, char* argv[])
     // Preparation phase (not timed)
     // Build histograms, indexes,...
     //
-    QueryInfo i;
+    unsigned turn = 0;
+    std::vector<std::string> queryOutputs(batchTP.NWORKER);
+    std::vector<TaskFuture> futures(batchTP.NWORKER);
     while (getline(cin, line))
     {
-        if (line == "F")
-            continue;  // End of a batch
-        i.parseQuery(line);
-        cout << joiner.join(i);
+        const bool endOfBatch = (line == "F");
+        const bool needFlush = (turn == batchTP.NWORKER) || endOfBatch;
+        if (needFlush)
+        {
+            for (unsigned i = 0; i < turn; ++i)
+            {
+                futures[i].wait();
+                std::cout << queryOutputs[i];
+            }
+
+            turn = 0;
+            if (endOfBatch)
+                continue;  // End of a batch
+        }
+
+        auto i = std::make_shared<QueryInfo>();
+        i->parseQuery(line);
+
+        futures[turn] = batchTP.Submit(
+            [i, &joiner](std::string& output) {
+                output = joiner.join(*i);
+            }, std::ref(queryOutputs[turn]));
+
+        ++turn;
     }
     return 0;
 }

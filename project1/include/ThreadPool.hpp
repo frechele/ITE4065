@@ -1,8 +1,8 @@
 #pragma once
 
 #include <cassert>
-#include <cstdint>
 #include <condition_variable>
+#include <cstdint>
 #include <deque>
 #include <functional>
 #include <future>
@@ -22,20 +22,24 @@ class ThreadPool final
  public:
     const int NWORKER;
 
-    ThreadPool() : NWORKER(std::thread::hardware_concurrency())
+    ThreadPool() : ThreadPool(std::thread::hardware_concurrency())
     {
-        assert(instance_ == nullptr);
-        instance_ = this;
+    }
 
+    ThreadPool(int workers) : NWORKER(workers)
+    {
         createWorkers();
     }
 
     ~ThreadPool() noexcept
     {
-        assert(instance_ == this);
-
         destroyWorkers();
         instance_ = nullptr;
+    }
+
+    void SetAsMainPool()
+    {
+        instance_ = this;
     }
 
     template <typename Func, typename... Args>
@@ -112,7 +116,8 @@ class ThreadPool final
 
 struct BlockInfo final
 {
-    BlockInfo(std::uint64_t begin_, std::uint64_t end_, unsigned minimumBlockSize = 1024)
+    BlockInfo(std::uint64_t begin_, std::uint64_t end_,
+              unsigned minimumBlockSize = 1024)
         : begin(begin_), end(end_), workSize(end - begin)
     {
         assert(begin <= end);
@@ -161,7 +166,8 @@ void parallel_for(const BlockInfo& bi, Func&& f, Args&&... args)
 }
 
 template <typename Func, typename... Args>
-void parallel_for(std::uint64_t begin, std::uint64_t end, Func&& f, Args&&... args)
+void parallel_for(std::uint64_t begin, std::uint64_t end, Func&& f,
+                  Args&&... args)
 {
     BlockInfo info(begin, end);
     parallel_for(info, std::forward<Func>(f), std::forward<Args>(args)...);
