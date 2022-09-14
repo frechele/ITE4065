@@ -21,7 +21,7 @@ class ThreadPool final
  public:
     const int NWORKER;
 
-    ThreadPool() : NWORKER(std::thread::hardware_concurrency() * 2)
+    ThreadPool() : NWORKER(std::thread::hardware_concurrency())
     {
         assert(instance_ == nullptr);
         instance_ = this;
@@ -110,11 +110,18 @@ class ThreadPool final
 };
 
 template <class IndexT>
-void get_parallel_size(IndexT begin, IndexT end, unsigned& blockCount, unsigned& blockSize)
+void get_parallel_size(IndexT begin, IndexT end, unsigned& blockCount, unsigned& blockSize, unsigned minimumBlockSize = 1024)
 {
     const unsigned workSize = end - begin;
+
     blockCount = ThreadPool::Get().NWORKER;
     blockSize = workSize / blockCount;
+
+    if (blockSize < minimumBlockSize)
+    {
+        blockSize = std::min(minimumBlockSize, workSize);
+        blockCount = workSize / blockSize;
+    }
 
     if (blockSize == 0)
     {
