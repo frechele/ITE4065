@@ -15,7 +15,8 @@ int main(int argc, char* argv[])
     ThreadPool pool;
     pool.SetAsMainPool();
 
-    ThreadPool batchTP;
+    // One thread is main thread
+    ThreadPool batchTP(pool.NWORKER - 1);
 
     Joiner joiner;
     // Read join relations
@@ -30,32 +31,33 @@ int main(int argc, char* argv[])
     // Build histograms, indexes,...
     //
     unsigned turn = 0;
-    std::vector<std::string> queryOutputs(batchTP.NWORKER);
-    std::vector<TaskFuture> futures(batchTP.NWORKER);
+    std::vector<std::future<std::string>> queryOutputs;
+    queryOutputs.reserve(batchTP.NWORKER);
     while (getline(cin, line))
     {
-        const bool endOfBatch = (line == "F");
-        const bool needFlush = (turn == batchTP.NWORKER) || endOfBatch;
-        if (needFlush)
+        if (line == "F")
         {
             for (unsigned i = 0; i < turn; ++i)
             {
-                futures[i].wait();
-                std::cout << queryOutputs[i];
+                std::cout << queryOutputs[i].get();
             }
 
             turn = 0;
-            if (endOfBatch)
-                continue;  // End of a batch
+            queryOutputs.clear();
+
+            continue;  // End of a batch
         }
 
         auto i = std::make_shared<QueryInfo>();
         i->parseQuery(line);
 
-        futures[turn] = batchTP.Submit(
-            [i, &joiner](std::string& output) {
-                output = joiner.join(*i);
-            }, std::ref(queryOutputs[turn]));
+        auto promise = std::make_shared<std::promise<std::string>>();
+        queryOutputs.emplace_back(promise->get_future());
+
+        batchTP.Submit(
+            [i, promise, &joiner] {
+                promise->set_value(joiner.join(*i));
+            });
 
         ++turn;
     }
