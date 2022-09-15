@@ -15,7 +15,7 @@ int main(int argc, char* argv[])
     ThreadPool pool;
     pool.SetAsMainPool();
 
-    ThreadPool batchTP(20);
+    ThreadPool batchTP;
 
     Joiner joiner;
     // Read join relations
