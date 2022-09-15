@@ -211,44 +211,66 @@ void Join::run()
     BlockInfo bi(0, right->resultSize);
 
     std::atomic<uint64_t> atmResultSize = 0;
-    std::vector<std::vector<std::vector<uint64_t>>> subResults(bi.blockCount);
-    for (auto& subResult : subResults)
-        subResult.resize(tmpResults.size());
+    std::vector<std::pair<HT::iterator, HT::iterator>> matches(
+        right->resultSize);
+    std::vector<uint64_t> matchCounts(right->resultSize);
 
     auto rightKeyColumn = rightInputData[rightColId];
-    parallel_for(bi, [this, &rightKeyColumn, &subResults, &atmResultSize](
+    parallel_for(bi, [this, &rightKeyColumn, &matches, &atmResultSize, &matchCounts](
                          unsigned rank, uint64_t begin, uint64_t end) {
         uint64_t localResultSize = 0;
         for (uint64_t i = begin; i < end; ++i)
         {
             auto rightKey = rightKeyColumn[i];
-            auto range = hashTable.equal_range(rightKey);
+            matches[i] = hashTable.equal_range(rightKey);
 
-            auto& subResult = subResults[rank];
-            for (auto iter = range.first; iter != range.second; ++iter)
-            {
-                unsigned relColId = 0;
-                for (unsigned cId = 0; cId < copyLeftData.size(); ++cId)
-                    subResult[relColId++].push_back(
-                        copyLeftData[cId][iter->second]);
+            const uint64_t matchCount = 
+                std::distance(matches[i].first, matches[i].second);
+            localResultSize += matchCount;
 
-                for (unsigned cId = 0; cId < copyRightData.size(); ++cId)
-                    subResult[relColId++].push_back(copyRightData[cId][i]);
-                ++localResultSize;
-            }
+            if (i < right->resultSize - 1)
+                matchCounts[i + 1] = matchCount;
         }
         std::atomic_fetch_add(&atmResultSize, localResultSize);
     });
 
-    for (const auto& subResult : subResults)
+    resultSize = atmResultSize.load();
+    if (resultSize == 0)
+        return;
+    
+    for (unsigned i = 1; i < right->resultSize - 1; ++i)
+        matchCounts[i + 1] += matchCounts[i];
+
+    const unsigned copyLeftSize = copyLeftData.size();
+    const unsigned copyRightSize = copyRightData.size();
+    const unsigned copyDataSize = copyLeftSize + copyRightSize;
+
+    for (auto& tmpResult : tmpResults)
     {
-        const unsigned totalSize = tmpResults.size();
-        for (unsigned i = 0; i < totalSize; ++i)
-            tmpResults[i].insert(end(tmpResults[i]), begin(subResult[i]),
-                                 end(subResult[i]));
+        tmpResult.resize(resultSize);
     }
 
-    resultSize = atmResultSize.load();
+    parallel_for(bi, [this, &matches, copyLeftSize, copyRightSize, &matchCounts](
+                         unsigned rank, uint64_t begin, uint64_t end) {
+        for (uint64_t i = begin; i < end; ++i)
+        {
+            auto& range = matches[i];
+            const auto startOffset = matchCounts[i];
+
+            unsigned j = 0;
+            for (auto iter = range.first; iter != range.second; ++iter, ++j)
+            {
+                unsigned relColId = 0;
+                for (unsigned cId = 0; cId < copyLeftSize; ++cId)
+                    tmpResults[relColId++][startOffset + j] =
+                        copyLeftData[cId][iter->second];
+
+                for (unsigned cId = 0; cId < copyRightSize; ++cId)
+                    tmpResults[relColId++][startOffset + j] =
+                        copyRightData[cId][i];
+            }
+        }
+    });
 }
 //---------------------------------------------------------------------------
 void SelfJoin::copy2Result(uint64_t id)
