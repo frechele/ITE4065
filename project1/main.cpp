@@ -7,14 +7,11 @@
 #include "Parser.hpp"
 
 #include "ThreadPool.hpp"
-#include "PerfMonitor.hpp"
 
 using namespace std;
 //---------------------------------------------------------------------------
 int main(int argc, char* argv[])
 {
-    PerfMonitor perfMonitor;
-
     ThreadPool pool;
     pool.SetAsMainPool();
 
@@ -64,8 +61,6 @@ int main(int argc, char* argv[])
 
         ++turn;
     }
-
-    perfMonitor.DumpMonitor();
 
     return 0;
 }
