@@ -48,16 +48,16 @@ int main(int argc, char* argv[])
             continue;  // End of a batch
         }
 
-        auto i = std::make_shared<QueryInfo>();
-        i->parseQuery(line);
-
         auto promise = std::make_shared<std::promise<std::string>>();
         queryOutputs.emplace_back(promise->get_future());
 
         batchTP.Submit(
-            [i, promise, &joiner] {
-                promise->set_value(joiner.join(*i));
-            });
+            [promise, &joiner](std::string query) {
+                QueryInfo i;
+                i.parseQuery(query);
+
+                promise->set_value(joiner.join(i));
+            }, std::move(line));
 
         ++turn;
     }
