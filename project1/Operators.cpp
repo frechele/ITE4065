@@ -5,6 +5,7 @@
 #include <iostream>
 
 #include <ThreadPool.hpp>
+#include <PerfMonitor.hpp>
 //---------------------------------------------------------------------------
 using namespace std;
 //---------------------------------------------------------------------------
@@ -77,6 +78,7 @@ bool FilterScan::applyFilter(uint64_t i, FilterInfo& f)
 void FilterScan::run()
 // Run
 {
+    Timer timer;
     BlockInfo bi(0, relation.size);
 
     std::atomic<uint64_t> atmResultSize = 0;
@@ -113,6 +115,8 @@ void FilterScan::run()
     }
 
     resultSize = atmResultSize.load();
+
+    PerfMonitor::Get().FilterScanMonitor.Update(timer.Elapsed());
 }
 //---------------------------------------------------------------------------
 vector<uint64_t*> Operator::getResults()
@@ -171,6 +175,8 @@ void Join::run()
 
     left->run();
     right->run();
+
+    Timer timer;
 
     // Use smaller input for build
     if (left->resultSize > right->resultSize)
@@ -271,6 +277,8 @@ void Join::run()
             }
         }
     });
+
+    PerfMonitor::Get().JoinMonitor.Update(timer.Elapsed());
 }
 //---------------------------------------------------------------------------
 void SelfJoin::copy2Result(uint64_t id)
@@ -303,6 +311,7 @@ void SelfJoin::run()
     input->run();
     inputData = input->getResults();
 
+    Timer timer;
     for (auto& iu : requiredIUs)
     {
         auto id = input->resolve(iu);
@@ -346,6 +355,8 @@ void SelfJoin::run()
     }
 
     resultSize = atmResultSize.load();
+    
+    PerfMonitor::Get().SelfJoinMonitor.Update(timer.Elapsed());
 }
 //---------------------------------------------------------------------------
 void Checksum::run()
@@ -358,6 +369,8 @@ void Checksum::run()
     input->run();
     auto results = input->getResults();
 
+    Timer timer;
+
     for (auto& sInfo : colInfo)
     {
         auto colId = input->resolve(sInfo);
@@ -369,5 +382,7 @@ void Checksum::run()
             sum += *iter;
         checkSums.push_back(sum);
     }
+
+    PerfMonitor::Get().ChecksumMonitor.Update(timer.Elapsed());
 }
 //---------------------------------------------------------------------------
