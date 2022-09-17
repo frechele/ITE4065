@@ -2,6 +2,7 @@
 
 #include <atomic>
 #include <chrono>
+#include <cmath>
 #include <iostream>
 #include <vector>
 
@@ -42,23 +43,40 @@ class PerfMonitor final
             monitors.emplace_back(this);
         }
 
+        void Update(const Timer& timer)
+        {
+            Update(timer.Elapsed());
+        }
+
         void Update(double value)
         {
             auto old = sum.load();
             while (!sum.compare_exchange_weak(old, old + value))
                 ;
+
+            old = sumSq.load();
+            while (!sumSq.compare_exchange_weak(old, old + value * value))
+                ;
+
             ++count;
         }
 
         void Reset()
         {
             sum = 0;
+            sumSq = 0;
             count = 0;
         }
 
         double Avg() const
         {
             return Sum() / Count();
+        }
+
+        double Std() const
+        {
+            const double mu = Avg();
+            return std::sqrt(sumSq.load() / Count() - mu * mu);
         }
 
         double Sum() const
@@ -78,6 +96,7 @@ class PerfMonitor final
 
      private:
         std::atomic<double> sum{ 0 };
+        std::atomic<double> sumSq{ 0 };
         std::atomic<uint64_t> count{ 0 };
         const std::string name_;
     };
@@ -121,8 +140,8 @@ class PerfMonitor final
         {
             std::cerr << monitor->GetName()
                       << " time(ms): avg=" << monitor->Avg()
-                      << " sum=" << monitor->Sum() << "(" << monitor->Count()
-                      << ")" << std::endl;
+                      << " std=" << monitor->Std() << " sum=" << monitor->Sum()
+                      << "(" << monitor->Count() << ")" << std::endl;
         }
     }
 
