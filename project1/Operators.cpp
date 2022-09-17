@@ -4,8 +4,8 @@
 #include <cassert>
 #include <iostream>
 
-#include <ThreadPool.hpp>
 #include <PerfMonitor.hpp>
+#include <ThreadPool.hpp>
 //---------------------------------------------------------------------------
 using namespace std;
 //---------------------------------------------------------------------------
@@ -190,6 +190,7 @@ void Join::run()
     auto rightInputData = right->getResults();
 
     // Resolve the input columns
+    Timer resolveTimer;
     unsigned resColId = 0;
     for (auto& info : requestedColumnsLeft)
     {
@@ -205,15 +206,20 @@ void Join::run()
     auto leftColId = left->resolve(pInfo.left);
     auto rightColId = right->resolve(pInfo.right);
 
+    PerfMonitor::Get().JoinResolveMonitor.Update(resolveTimer.Elapsed());
+
     // Build phase
+    Timer buildPhaseTimer;
     auto leftKeyColumn = leftInputData[leftColId];
     hashTable.reserve(left->resultSize * 2);
     for (uint64_t i = 0, limit = i + left->resultSize; i != limit; ++i)
     {
         hashTable.emplace(leftKeyColumn[i], i);
     }
+    PerfMonitor::Get().JoinBuildPhaseMonitor.Update(buildPhaseTimer.Elapsed());
 
     // Probe phase
+    Timer probePhaseTimer1;
     BlockInfo bi(0, right->resultSize);
 
     std::atomic<uint64_t> atmResultSize = 0;
@@ -222,28 +228,32 @@ void Join::run()
     std::vector<uint64_t> matchCounts(right->resultSize);
 
     auto rightKeyColumn = rightInputData[rightColId];
-    parallel_for(bi, [this, &rightKeyColumn, &matches, &atmResultSize, &matchCounts](
-                         unsigned rank, uint64_t begin, uint64_t end) {
-        uint64_t localResultSize = 0;
-        for (uint64_t i = begin; i < end; ++i)
-        {
-            auto rightKey = rightKeyColumn[i];
-            matches[i] = hashTable.equal_range(rightKey);
+    parallel_for(
+        bi, [this, &rightKeyColumn, &matches, &atmResultSize, &matchCounts](
+                unsigned rank, uint64_t begin, uint64_t end) {
+            uint64_t localResultSize = 0;
+            for (uint64_t i = begin; i < end; ++i)
+            {
+                auto rightKey = rightKeyColumn[i];
+                matches[i] = hashTable.equal_range(rightKey);
 
-            const uint64_t matchCount = 
-                std::distance(matches[i].first, matches[i].second);
-            localResultSize += matchCount;
+                const uint64_t matchCount =
+                    std::distance(matches[i].first, matches[i].second);
+                localResultSize += matchCount;
 
-            if (i < right->resultSize - 1)
-                matchCounts[i + 1] = matchCount;
-        }
-        std::atomic_fetch_add(&atmResultSize, localResultSize);
-    });
+                if (i < right->resultSize - 1)
+                    matchCounts[i + 1] = matchCount;
+            }
+            std::atomic_fetch_add(&atmResultSize, localResultSize);
+        });
+    PerfMonitor::Get().JoinProbePhaseMonitor1.Update(
+        probePhaseTimer1.Elapsed());
 
+    Timer probePhaseTimer2;
     resultSize = atmResultSize.load();
     if (resultSize == 0)
         return;
-    
+
     for (unsigned i = 1; i < right->resultSize - 1; ++i)
         matchCounts[i + 1] += matchCounts[i];
 
@@ -255,29 +265,35 @@ void Join::run()
     {
         tmpResult.resize(resultSize);
     }
+    PerfMonitor::Get().JoinProbePhaseMonitor2.Update(
+        probePhaseTimer2.Elapsed());
 
-    parallel_for(bi, [this, &matches, copyLeftSize, copyRightSize, &matchCounts](
-                         unsigned rank, uint64_t begin, uint64_t end) {
-        for (uint64_t i = begin; i < end; ++i)
-        {
-            auto& range = matches[i];
-            const auto startOffset = matchCounts[i];
-
-            unsigned j = 0;
-            for (auto iter = range.first; iter != range.second; ++iter, ++j)
+    Timer probePhaseTimer3;
+    parallel_for(
+        bi, [this, &matches, copyLeftSize, copyRightSize, &matchCounts](
+                unsigned rank, uint64_t begin, uint64_t end) {
+            for (uint64_t i = begin; i < end; ++i)
             {
-                unsigned relColId = 0;
-                for (unsigned cId = 0; cId < copyLeftSize; ++cId)
-                    tmpResults[relColId++][startOffset + j] =
-                        copyLeftData[cId][iter->second];
+                auto& range = matches[i];
+                const auto startOffset = matchCounts[i];
 
-                for (unsigned cId = 0; cId < copyRightSize; ++cId)
-                    tmpResults[relColId++][startOffset + j] =
-                        copyRightData[cId][i];
+                unsigned j = 0;
+                for (auto iter = range.first; iter != range.second; ++iter, ++j)
+                {
+                    unsigned relColId = 0;
+                    for (unsigned cId = 0; cId < copyLeftSize; ++cId)
+                        tmpResults[relColId++][startOffset + j] =
+                            copyLeftData[cId][iter->second];
+
+                    for (unsigned cId = 0; cId < copyRightSize; ++cId)
+                        tmpResults[relColId++][startOffset + j] =
+                            copyRightData[cId][i];
+                }
             }
-        }
-    });
+        });
 
+    PerfMonitor::Get().JoinProbePhaseMonitor3.Update(
+        probePhaseTimer3.Elapsed());
     PerfMonitor::Get().JoinMonitor.Update(timer.Elapsed());
 }
 //---------------------------------------------------------------------------
@@ -355,7 +371,7 @@ void SelfJoin::run()
     }
 
     resultSize = atmResultSize.load();
-    
+
     PerfMonitor::Get().SelfJoinMonitor.Update(timer.Elapsed());
 }
 //---------------------------------------------------------------------------
@@ -371,17 +387,25 @@ void Checksum::run()
 
     Timer timer;
 
-    for (auto& sInfo : colInfo)
-    {
-        auto colId = input->resolve(sInfo);
-        auto resultCol = results[colId];
-        uint64_t sum = 0;
-        resultSize = input->resultSize;
-        for (auto iter = resultCol, limit = iter + input->resultSize;
-             iter != limit; ++iter)
-            sum += *iter;
-        checkSums.push_back(sum);
-    }
+    checkSums.resize(colInfo.size());
+
+    BlockInfo bi(0, colInfo.size());
+    parallel_for(
+        bi, [this, &results](unsigned rank, uint64_t begin, uint64_t end) {
+            for (uint64_t i = begin; i < end; ++i)
+            {
+                auto& sInfo = colInfo[i];
+                auto colId = input->resolve(sInfo);
+                auto resultCol = results[colId];
+                resultSize = input->resultSize;
+
+                uint64_t sum = 0;
+                for (auto iter = resultCol, limit = iter + input->resultSize;
+                     iter != limit; ++iter)
+                    sum += *iter;
+                checkSums[i] = sum;
+            }
+        });
 
     PerfMonitor::Get().ChecksumMonitor.Update(timer.Elapsed());
 }

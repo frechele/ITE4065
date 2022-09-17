@@ -19,7 +19,7 @@ class Timer final
 
     double Elapsed() const
     {
-        return std::chrono::duration_cast<std::chrono::milliseconds>(
+        return std::chrono::duration<double, std::milli>(
                    std::chrono::high_resolution_clock::now() - start_)
             .count();
     }
@@ -34,8 +34,12 @@ class PerfMonitor final
     class Monitor final
     {
      public:
+        inline static std::vector<Monitor*> monitors;
+
+     public:
         Monitor(std::string name) : name_(std::move(name))
         {
+            monitors.emplace_back(this);
         }
 
         void Update(double value)
@@ -52,9 +56,19 @@ class PerfMonitor final
             count = 0;
         }
 
-        double Get() const
+        double Avg() const
         {
-            return sum.load() / count.load();
+            return Sum() / Count();
+        }
+
+        double Sum() const
+        {
+            return sum.load();
+        }
+
+        uint64_t Count() const
+        {
+            return count.load();
         }
 
         const std::string& GetName() const
@@ -68,9 +82,19 @@ class PerfMonitor final
         const std::string name_;
     };
 
+    Monitor QueryParsingMonitor{ "Query parsing" };
+
     Monitor FilterScanMonitor{ "FilterScan::run" };
+
     Monitor JoinMonitor{ "Join::run" };
+    Monitor JoinResolveMonitor{ "\tJoin resolve" };
+    Monitor JoinBuildPhaseMonitor{ "\tJoin build phase" };
+    Monitor JoinProbePhaseMonitor1{ "\tJoin probe phase1" };
+    Monitor JoinProbePhaseMonitor2{ "\tJoin probe phase2" };
+    Monitor JoinProbePhaseMonitor3{ "\tJoin probe phase2" };
+
     Monitor SelfJoinMonitor{ "SelfJoin::run" };
+
     Monitor ChecksumMonitor{ "Checksum::run" };
 
  public:
@@ -91,19 +115,15 @@ class PerfMonitor final
 
     void DumpMonitor() const
     {
-        for (auto monitor : monitors_)
+        for (auto monitor : Monitor::monitors)
         {
-            std::cerr << monitor->GetName() << " time: " << monitor->Get() << " ms" << std::endl;
+            std::cerr << monitor->GetName()
+                      << " time(ms): avg=" << monitor->Avg()
+                      << " sum=" << monitor->Sum() << "(" << monitor->Count()
+                      << ")" << std::endl;
         }
     }
 
  private:
     inline static PerfMonitor* instance_{ nullptr };
-
-    std::vector<Monitor*> monitors_ {
-        &FilterScanMonitor,
-        &JoinMonitor,
-        &SelfJoinMonitor,
-        &ChecksumMonitor,
-    };
 };
