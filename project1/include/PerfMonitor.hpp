@@ -97,6 +97,8 @@ class PerfMonitor final
 
     Monitor ChecksumMonitor{ "Checksum::run" };
 
+    Monitor QueuingDelayMonitor{ "Queuing delay" };
+
  public:
     static PerfMonitor& Get()
     {

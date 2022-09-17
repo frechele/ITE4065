@@ -9,6 +9,8 @@
 #include <thread>
 #include <vector>
 
+#include <PerfMonitor.hpp>
+
 using TaskFuture = std::future<void>;
 
 class ThreadPool final
@@ -150,6 +152,14 @@ struct BlockInfo final
 template <typename Func, typename... Args>
 void parallel_for(const BlockInfo& bi, Func&& f, Args&&... args)
 {
+    if (bi.blockCount == 1)
+    {
+        f(0, bi.begin, bi.end);
+        return;
+    }
+
+    Timer timer;
+
     std::vector<TaskFuture> futures(bi.blockCount);
     for (unsigned blockID = 0; blockID < bi.blockCount; ++blockID)
     {
@@ -160,6 +170,8 @@ void parallel_for(const BlockInfo& bi, Func&& f, Args&&... args)
         futures[blockID] =
             ThreadPool::Get().Submit(f, blockID, blockBegin, blockEnd);
     }
+
+    PerfMonitor::Get().QueuingDelayMonitor.Update(timer);
 
     for (auto& future : futures)
         future.wait();
