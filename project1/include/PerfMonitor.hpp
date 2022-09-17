@@ -101,6 +101,12 @@ class PerfMonitor final
         const std::string name_;
     };
 
+    // Joiner
+    Monitor JoinerAddScan{ "Joiner::addScan" };
+    Monitor JoinerAnalyzeInputOfJoin{ "Joiner::analyzeInputOfJoin" };
+    Monitor JoinerJoinPrepare{ "Joiner join prepare" };
+
+    // Operators
     Monitor QueryParsingMonitor{ "Query parsing" };
 
     Monitor FilterScanMonitor{ "FilterScan::run" };
@@ -116,6 +122,7 @@ class PerfMonitor final
 
     Monitor ChecksumMonitor{ "Checksum::run" };
 
+    // TheadPool
     Monitor QueuingDelayMonitor{ "Queuing delay" };
 
  public:

@@ -8,6 +8,8 @@
 #include <utility>
 #include <vector>
 #include "Parser.hpp"
+
+#include <PerfMonitor.hpp>
 //---------------------------------------------------------------------------
 using namespace std;
 //---------------------------------------------------------------------------
@@ -32,6 +34,7 @@ unique_ptr<Operator> Joiner::addScan(set<unsigned>& usedRelations,
                                      SelectInfo& info, QueryInfo& query)
 // Add scan to query
 {
+    Timer timer;
     usedRelations.emplace(info.binding);
     vector<FilterInfo> filters;
     for (auto& f : query.filters)
@@ -41,6 +44,8 @@ unique_ptr<Operator> Joiner::addScan(set<unsigned>& usedRelations,
             filters.emplace_back(f);
         }
     }
+    PerfMonitor::Get().JoinerAddScan.Update(timer);
+
     return filters.size()
                ? make_unique<FilterScan>(getRelation(info.relId), filters)
                : make_unique<Scan>(getRelation(info.relId), info.binding);
@@ -59,8 +64,10 @@ static QueryGraphProvides analyzeInputOfJoin(set<unsigned>& usedRelations,
                                              SelectInfo& rightInfo)
 // Analyzes inputs of join
 {
+    Timer timer;
     bool usedLeft = usedRelations.count(leftInfo.binding);
     bool usedRight = usedRelations.count(rightInfo.binding);
+    PerfMonitor::Get().JoinerAnalyzeInputOfJoin.Update(timer);
 
     if (usedLeft ^ usedRight)
         return usedLeft ? QueryGraphProvides::Left : QueryGraphProvides::Right;
@@ -72,6 +79,7 @@ static QueryGraphProvides analyzeInputOfJoin(set<unsigned>& usedRelations,
 string Joiner::join(QueryInfo& query)
 // Executes a join query
 {
+    Timer timer;
     // cerr << query.dumpText() << endl;
     set<unsigned> usedRelations;
 
@@ -115,6 +123,8 @@ string Joiner::join(QueryInfo& query)
                 break;
         };
     }
+
+    PerfMonitor::Get().JoinerJoinPrepare.Update(timer);
 
     Checksum checkSum(move(root), query.selections);
     checkSum.run();
