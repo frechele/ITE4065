@@ -116,7 +116,7 @@ void FilterScan::run()
 
     resultSize = atmResultSize.load();
 
-    PerfMonitor::Get().FilterScanMonitor.Update(timer.Elapsed());
+    PerfMonitor::Get().FilterScanMonitor.Update(timer);
 }
 //---------------------------------------------------------------------------
 vector<uint64_t*> Operator::getResults()
@@ -206,7 +206,7 @@ void Join::run()
     auto leftColId = left->resolve(pInfo.left);
     auto rightColId = right->resolve(pInfo.right);
 
-    PerfMonitor::Get().JoinResolveMonitor.Update(resolveTimer.Elapsed());
+    PerfMonitor::Get().JoinResolveMonitor.Update(resolveTimer);
 
     // Build phase
     Timer buildPhaseTimer;
@@ -216,7 +216,7 @@ void Join::run()
     {
         hashTable.emplace(leftKeyColumn[i], i);
     }
-    PerfMonitor::Get().JoinBuildPhaseMonitor.Update(buildPhaseTimer.Elapsed());
+    PerfMonitor::Get().JoinBuildPhaseMonitor.Update(buildPhaseTimer);
 
     // Probe phase
     Timer probePhaseTimer1;
@@ -246,8 +246,7 @@ void Join::run()
             }
             std::atomic_fetch_add(&atmResultSize, localResultSize);
         });
-    PerfMonitor::Get().JoinProbePhaseMonitor1.Update(
-        probePhaseTimer1.Elapsed());
+    PerfMonitor::Get().JoinProbePhaseMonitor1.Update(probePhaseTimer1);
 
     Timer probePhaseTimer2;
     resultSize = atmResultSize.load();
@@ -265,8 +264,7 @@ void Join::run()
     {
         tmpResult.resize(resultSize);
     }
-    PerfMonitor::Get().JoinProbePhaseMonitor2.Update(
-        probePhaseTimer2.Elapsed());
+    PerfMonitor::Get().JoinProbePhaseMonitor2.Update(probePhaseTimer2);
 
     Timer probePhaseTimer3;
     parallel_for(
@@ -292,9 +290,8 @@ void Join::run()
             }
         });
 
-    PerfMonitor::Get().JoinProbePhaseMonitor3.Update(
-        probePhaseTimer3.Elapsed());
-    PerfMonitor::Get().JoinMonitor.Update(timer.Elapsed());
+    PerfMonitor::Get().JoinProbePhaseMonitor3.Update(probePhaseTimer3);
+    PerfMonitor::Get().JoinMonitor.Update(timer);
 }
 //---------------------------------------------------------------------------
 void SelfJoin::copy2Result(uint64_t id)
@@ -372,7 +369,7 @@ void SelfJoin::run()
 
     resultSize = atmResultSize.load();
 
-    PerfMonitor::Get().SelfJoinMonitor.Update(timer.Elapsed());
+    PerfMonitor::Get().SelfJoinMonitor.Update(timer);
 }
 //---------------------------------------------------------------------------
 void Checksum::run()
@@ -389,24 +386,20 @@ void Checksum::run()
 
     checkSums.resize(colInfo.size());
 
-    BlockInfo bi(0, colInfo.size());
-    parallel_for(
-        bi, [this, &results](unsigned rank, uint64_t begin, uint64_t end) {
-            for (uint64_t i = begin; i < end; ++i)
-            {
-                auto& sInfo = colInfo[i];
-                auto colId = input->resolve(sInfo);
-                auto resultCol = results[colId];
-                resultSize = input->resultSize;
+    for (uint64_t i = 0; i < colInfo.size(); ++i)
+    {
+        auto& sInfo = colInfo[i];
+        auto colId = input->resolve(sInfo);
+        auto resultCol = results[colId];
+        resultSize = input->resultSize;
 
-                uint64_t sum = 0;
-                for (auto iter = resultCol, limit = iter + input->resultSize;
-                     iter != limit; ++iter)
-                    sum += *iter;
-                checkSums[i] = sum;
-            }
-        });
+        uint64_t sum = 0;
+        for (uint64_t i = 0; i < input->resultSize; ++i)
+            sum += resultCol[i];
 
-    PerfMonitor::Get().ChecksumMonitor.Update(timer.Elapsed());
+        checkSums[i] = sum;
+    }
+
+    PerfMonitor::Get().ChecksumMonitor.Update(timer);
 }
 //---------------------------------------------------------------------------
