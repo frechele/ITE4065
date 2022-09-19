@@ -119,25 +119,23 @@ class ThreadPool final
 struct BlockInfo final
 {
     BlockInfo(std::uint64_t begin_, std::uint64_t end_,
-              unsigned minimumBlockSize = 1024)
+              unsigned blockSize_ = 512)
         : begin(begin_), end(end_), workSize(end - begin)
     {
         assert(begin <= end);
-        assert(minimumBlockSize > 0);
+        assert(blockSize_ > 0);
 
-        blockCount = ThreadPool::Get().NWORKER;
-        blockSize = workSize / blockCount;
-
-        if (blockSize < minimumBlockSize)
+        if (blockSize_ > workSize)
         {
-            blockCount = workSize / minimumBlockSize;
-            blockSize = minimumBlockSize;
-        }
-
-        if (blockCount == 0)
-        {
-            blockCount = 1;
             blockSize = workSize;
+            blockCount = 1;
+        }
+        else
+        {
+            blockSize = blockSize_;
+            blockCount = workSize / blockSize;
+            if (workSize % blockSize != 0)
+                ++blockCount;
         }
     }
 

@@ -79,7 +79,8 @@ void FilterScan::run()
 // Run
 {
     Timer timer;
-    BlockInfo bi(0, relation.size);
+
+    BlockInfo bi(0, relation.size, 1 << 11);
 
     std::atomic<uint64_t> atmResultSize = 0;
     std::vector<std::vector<std::vector<uint64_t>>> subResults(bi.blockCount);
@@ -267,8 +268,9 @@ void Join::run()
     PerfMonitor::Get().JoinProbePhaseMonitor2.Update(probePhaseTimer2);
 
     Timer probePhaseTimer3;
+    BlockInfo bi2(0, right->resultSize, 1 << 10);
     parallel_for(
-        bi, [this, &matches, copyLeftSize, copyRightSize, &matchCounts](
+        bi2, [this, &matches, copyLeftSize, copyRightSize, &matchCounts](
                 unsigned rank, uint64_t begin, uint64_t end) {
             for (uint64_t i = begin; i < end; ++i)
             {
@@ -362,9 +364,14 @@ void SelfJoin::run()
     for (const auto& subResult : subResults)
     {
         const unsigned totalSize = tmpResults.size();
-        for (unsigned i = 0; i < totalSize; ++i)
-            tmpResults[i].insert(end(tmpResults[i]), begin(subResult[i]),
-                                 end(subResult[i]));
+
+        for (uint64_t i = 0; i < totalSize; ++i)
+        {
+            auto& tmpResult = tmpResults[i];
+            const auto& subResultCol = subResult[i];
+            tmpResult.insert(tmpResult.end(), subResultCol.begin(),
+                             subResultCol.end());
+        }
     }
 
     resultSize = atmResultSize.load();
