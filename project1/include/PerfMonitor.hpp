@@ -2,7 +2,6 @@
 
 #include <atomic>
 #include <chrono>
-#include <cmath>
 #include <iostream>
 #include <vector>
 
@@ -43,40 +42,23 @@ class PerfMonitor final
             monitors.emplace_back(this);
         }
 
-        void Update(const Timer& timer)
-        {
-            Update(timer.Elapsed());
-        }
-
         void Update(double value)
         {
             auto old = sum.load();
             while (!sum.compare_exchange_weak(old, old + value))
                 ;
-
-            old = sumSq.load();
-            while (!sumSq.compare_exchange_weak(old, old + value * value))
-                ;
-
             ++count;
         }
 
         void Reset()
         {
             sum = 0;
-            sumSq = 0;
             count = 0;
         }
 
         double Avg() const
         {
             return Sum() / Count();
-        }
-
-        double Std() const
-        {
-            const double mu = Avg();
-            return std::sqrt(sumSq.load() / Count() - mu * mu);
         }
 
         double Sum() const
@@ -96,29 +78,24 @@ class PerfMonitor final
 
      private:
         std::atomic<double> sum{ 0 };
-        std::atomic<double> sumSq{ 0 };
         std::atomic<uint64_t> count{ 0 };
         const std::string name_;
     };
 
-    // Joiner
-    Monitor JoinerAddScan{ "Joiner::addScan" };
-    Monitor JoinerAnalyzeInputOfJoin{ "Joiner::analyzeInputOfJoin" };
-    Monitor JoinerJoinPrepare{ "Joiner join prepare" };
-
-    // Operators
     Monitor QueryParsingMonitor{ "Query parsing" };
 
     Monitor FilterScanMonitor{ "FilterScan::run" };
 
     Monitor JoinMonitor{ "Join::run" };
+    Monitor JoinResolveMonitor{ "\tJoin resolve" };
+    Monitor JoinBuildPhaseMonitor{ "\tJoin build phase" };
+    Monitor JoinProbePhaseMonitor1{ "\tJoin probe phase1" };
+    Monitor JoinProbePhaseMonitor2{ "\tJoin probe phase2" };
+    Monitor JoinProbePhaseMonitor3{ "\tJoin probe phase2" };
 
     Monitor SelfJoinMonitor{ "SelfJoin::run" };
 
     Monitor ChecksumMonitor{ "Checksum::run" };
-
-    // TheadPool
-    Monitor QueuingDelayMonitor{ "Queuing delay" };
 
  public:
     static PerfMonitor& Get()
@@ -142,28 +119,11 @@ class PerfMonitor final
         {
             std::cerr << monitor->GetName()
                       << " time(ms): avg=" << monitor->Avg()
-                      << " std=" << monitor->Std() << " sum=" << monitor->Sum()
-                      << "(" << monitor->Count() << ")" << std::endl;
+                      << " sum=" << monitor->Sum() << "(" << monitor->Count()
+                      << ")" << std::endl;
         }
     }
 
  private:
     inline static PerfMonitor* instance_{ nullptr };
-};
-
-class ScopedMonitor final
-{
- public:
-    ScopedMonitor(PerfMonitor::Monitor& monitor) : monitor_(monitor)
-    {
-    }
-
-    ~ScopedMonitor()
-    {
-        monitor_.Update(timer_);
-    }
-
- private:
-    PerfMonitor::Monitor& monitor_;
-    Timer timer_;
 };
