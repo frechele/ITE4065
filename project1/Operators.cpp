@@ -1,6 +1,8 @@
 #include <Operators.hpp>
 #include <cassert>
 #include <iostream>
+
+#include <PerfMonitor.hpp>
 //---------------------------------------------------------------------------
 using namespace std;
 //---------------------------------------------------------------------------
@@ -70,7 +72,7 @@ bool FilterScan::applyFilter(uint64_t i, FilterInfo& f)
     return false;
 }
 //---------------------------------------------------------------------------
-void FilterScan::run()
+void FilterScan::runSequential()
 // Run
 {
     for (uint64_t i = 0; i < relation.size; ++i)
@@ -83,6 +85,13 @@ void FilterScan::run()
         if (pass)
             copy2Result(i);
     }
+}
+
+void FilterScan::run()
+{
+    ScopedMonitor monitor(PerfMonitor::Get().FilterScanMonitor);
+
+    runSequential();
 }
 //---------------------------------------------------------------------------
 vector<uint64_t*> Operator::getResults()
@@ -133,7 +142,7 @@ void Join::copy2Result(uint64_t leftId, uint64_t rightId)
     ++resultSize;
 }
 //---------------------------------------------------------------------------
-void Join::run()
+void Join::runSequential()
 // Run
 {
     left->require(pInfo.left);
@@ -187,6 +196,13 @@ void Join::run()
         }
     }
 }
+
+void Join::run()
+{
+    ScopedMonitor monitor(PerfMonitor::Get().JoinMonitor);
+
+    runSequential();
+}
 //---------------------------------------------------------------------------
 void SelfJoin::copy2Result(uint64_t id)
 // Copy to result
@@ -210,7 +226,7 @@ bool SelfJoin::require(SelectInfo info)
     return false;
 }
 //---------------------------------------------------------------------------
-void SelfJoin::run()
+void SelfJoin::runSequential()
 // Run
 {
     input->require(pInfo.left);
@@ -236,8 +252,15 @@ void SelfJoin::run()
             copy2Result(i);
     }
 }
+
+void SelfJoin::run()
+{
+    ScopedMonitor monitor(PerfMonitor::Get().SelfJoinMonitor);
+
+    runSequential();
+}
 //---------------------------------------------------------------------------
-void Checksum::run()
+void Checksum::runSequential()
 // Run
 {
     for (auto& sInfo : colInfo)
@@ -258,5 +281,12 @@ void Checksum::run()
             sum += *iter;
         checkSums.push_back(sum);
     }
+}
+
+void Checksum::run()
+{
+    ScopedMonitor monitor(PerfMonitor::Get().ChecksumMonitor);
+
+    runSequential();
 }
 //---------------------------------------------------------------------------

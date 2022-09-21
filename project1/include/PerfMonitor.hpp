@@ -112,11 +112,6 @@ class PerfMonitor final
     Monitor FilterScanMonitor{ "FilterScan::run" };
 
     Monitor JoinMonitor{ "Join::run" };
-    Monitor JoinResolveMonitor{ "\tJoin resolve" };
-    Monitor JoinBuildPhaseMonitor{ "\tJoin build phase" };
-    Monitor JoinProbePhaseMonitor1{ "\tJoin probe phase1" };
-    Monitor JoinProbePhaseMonitor2{ "\tJoin probe phase2" };
-    Monitor JoinProbePhaseMonitor3{ "\tJoin probe phase2" };
 
     Monitor SelfJoinMonitor{ "SelfJoin::run" };
 
@@ -154,4 +149,21 @@ class PerfMonitor final
 
  private:
     inline static PerfMonitor* instance_{ nullptr };
+};
+
+class ScopedMonitor final
+{
+ public:
+    ScopedMonitor(PerfMonitor::Monitor& monitor) : monitor_(monitor)
+    {
+    }
+
+    ~ScopedMonitor()
+    {
+        monitor_.Update(timer_);
+    }
+
+ private:
+    PerfMonitor::Monitor& monitor_;
+    Timer timer_;
 };

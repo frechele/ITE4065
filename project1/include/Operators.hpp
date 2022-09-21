@@ -85,6 +85,8 @@ class FilterScan : public Scan
     /// Copy tuple to result
     void copy2Result(uint64_t id);
 
+    void runSequential();
+
  public:
     /// The constructor
     FilterScan(Relation& r, std::vector<FilterInfo> filters)
@@ -128,6 +130,8 @@ class Join : public Operator
     /// The input data that has to be copied
     std::vector<uint64_t*> copyLeftData, copyRightData;
 
+    void runSequential();
+
  public:
     /// The constructor
     Join(std::unique_ptr<Operator>&& left, std::unique_ptr<Operator>&& right,
@@ -155,6 +159,8 @@ class SelfJoin : public Operator
     /// The input data that has to be copied
     std::vector<uint64_t*> copyData;
 
+    void runSequential();
+
  public:
     /// The constructor
     SelfJoin(std::unique_ptr<Operator>&& input, PredicateInfo& pInfo)
@@ -171,6 +177,8 @@ class Checksum : public Operator
     std::unique_ptr<Operator> input;
     /// The join predicate info
     std::vector<SelectInfo>& colInfo;
+
+    void runSequential();
 
  public:
     std::vector<uint64_t> checkSums;
