@@ -118,25 +118,47 @@ class ThreadPool final
 
 struct BlockInfo final
 {
-    BlockInfo(std::uint64_t begin_, std::uint64_t end_,
-              unsigned blockSize_ = 512)
-        : begin(begin_), end(end_), workSize(end - begin)
+    static BlockInfo CreateUniformBlock(std::uint64_t begin, std::uint64_t end, unsigned blockSize)
     {
-        assert(begin <= end);
-        assert(blockSize_ > 0);
+        unsigned blockCount;
 
-        if (blockSize_ > workSize)
+        const uint64_t workSize = end - begin;
+
+        if (blockSize > workSize)
         {
             blockSize = workSize;
             blockCount = 1;
         }
         else
         {
-            blockSize = blockSize_;
             blockCount = workSize / blockSize;
             if (workSize % blockSize != 0)
                 ++blockCount;
         }
+        return BlockInfo(begin, end, workSize, blockCount, blockSize);
+    }
+
+    static BlockInfo CreateMinBlock(std::uint64_t begin, std::uint64_t end, unsigned minBlockSize)
+    {
+        assert(minBlockSize > 0);
+
+        const uint64_t workSize = end - begin;
+
+        unsigned blockCount = ThreadPool::Get().NWORKER;
+        unsigned blockSize = workSize / blockCount;
+
+        if (blockSize < minBlockSize)
+        {
+            blockSize = minBlockSize;
+            blockCount = workSize / blockSize;
+        }
+
+        if (blockCount == 0)
+        {
+            blockCount = 1;
+            blockSize = workSize;
+        }
+        return BlockInfo(begin, end, workSize, blockCount, blockSize);
     }
 
     const std::uint64_t begin;
@@ -145,6 +167,18 @@ struct BlockInfo final
 
     unsigned blockCount;
     unsigned blockSize;
+
+ private:
+    BlockInfo(std::uint64_t begin_, std::uint64_t end_, unsigned workSize_,
+              unsigned blockCount_, unsigned blockSize_)
+        : begin(begin_),
+          end(end_),
+          workSize(workSize_),
+          blockCount(blockCount_),
+          blockSize(blockSize_)
+    {
+        assert(begin <= end);
+    }
 };
 
 template <typename Func, typename... Args>

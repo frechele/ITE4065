@@ -178,7 +178,11 @@ class Checksum : public Operator
     /// The join predicate info
     std::vector<SelectInfo>& colInfo;
 
+    void processInput();
+    void processOutputParallel();
+
     void runSequential();
+    void runParallel();
 
  public:
     std::vector<uint64_t> checkSums;

@@ -3,6 +3,7 @@
 #include <iostream>
 
 #include <PerfMonitor.hpp>
+#include <ThreadPool.hpp>
 //---------------------------------------------------------------------------
 using namespace std;
 //---------------------------------------------------------------------------
@@ -260,14 +261,60 @@ void SelfJoin::run()
     runSequential();
 }
 //---------------------------------------------------------------------------
-void Checksum::runSequential()
-// Run
+void Checksum::processInput()
 {
     for (auto& sInfo : colInfo)
     {
         input->require(sInfo);
     }
     input->run();
+}
+
+void Checksum::processOutputParallel()
+{
+    auto results = input->getResults();
+
+    checkSums.resize(colInfo.size());
+
+    // colInfo is quite small,
+    // bottleneck is summation
+    for (uint64_t i = 0; i < colInfo.size(); ++i)
+    {
+        auto& sInfo = colInfo[i];
+        auto colId = input->resolve(sInfo);
+        auto resultCol = results[colId];
+
+        auto bi = BlockInfo::CreateMinBlock(0, input->resultSize, 1 << 10);
+        std::vector<uint64_t> partialSums(bi.blockCount);
+        parallel_for(bi,
+                     [this, resultCol, &partialSums](
+                         unsigned rank, uint64_t beginIdx, uint64_t endIdx) {
+                         uint64_t sum = 0;
+
+                         for (uint64_t i = beginIdx; i < endIdx; ++i)
+                         {
+                             sum += resultCol[i];
+                         }
+
+                         partialSums[rank] = sum;
+                     });
+
+        uint64_t sum = 0;
+        for (auto partialSum : partialSums)
+        {
+            sum += partialSum;
+        }
+        checkSums[i] = sum;
+    }
+
+    resultSize = input->resultSize;
+}
+
+void Checksum::runSequential()
+// Run
+{
+    processInput();
+
     auto results = input->getResults();
 
     for (auto& sInfo : colInfo)
@@ -283,10 +330,16 @@ void Checksum::runSequential()
     }
 }
 
+void Checksum::runParallel()
+{
+    processInput();
+    processOutputParallel();
+}
+
 void Checksum::run()
 {
     ScopedMonitor monitor(PerfMonitor::Get().ChecksumMonitor);
 
-    runSequential();
+    runParallel();
 }
 //---------------------------------------------------------------------------
