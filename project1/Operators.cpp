@@ -1,11 +1,6 @@
 #include <Operators.hpp>
-
-#include <atomic>
 #include <cassert>
 #include <iostream>
-
-#include <PerfMonitor.hpp>
-#include <ThreadPool.hpp>
 //---------------------------------------------------------------------------
 using namespace std;
 //---------------------------------------------------------------------------
@@ -78,46 +73,16 @@ bool FilterScan::applyFilter(uint64_t i, FilterInfo& f)
 void FilterScan::run()
 // Run
 {
-    Timer timer;
-
-    BlockInfo bi(0, relation.size, 1 << 11);
-
-    std::atomic<uint64_t> atmResultSize = 0;
-    std::vector<std::vector<std::vector<uint64_t>>> subResults(bi.blockCount);
-    for (auto& subResult : subResults)
-        subResult.resize(tmpResults.size());
-
-    parallel_for(bi, [this, &atmResultSize, &subResults](
-                         unsigned rank, uint64_t begin, uint64_t end) {
-        uint64_t localResultSize = 0;
-        for (unsigned i = begin; i < end; ++i)
-        {
-            bool pass = true;
-            for (auto& f : filters)
-            {
-                pass &= applyFilter(i, f);
-            }
-            if (pass)
-            {
-                for (unsigned cId = 0; cId < inputData.size(); ++cId)
-                    subResults[rank][cId].push_back(inputData[cId][i]);
-                ++localResultSize;
-            }
-        }
-        std::atomic_fetch_add(&atmResultSize, localResultSize);
-    });
-
-    for (const auto& subResult : subResults)
+    for (uint64_t i = 0; i < relation.size; ++i)
     {
-        const unsigned totalSize = tmpResults.size();
-        for (unsigned i = 0; i < totalSize; ++i)
-            tmpResults[i].insert(end(tmpResults[i]), begin(subResult[i]),
-                                 end(subResult[i]));
+        bool pass = true;
+        for (auto& f : filters)
+        {
+            pass &= applyFilter(i, f);
+        }
+        if (pass)
+            copy2Result(i);
     }
-
-    resultSize = atmResultSize.load();
-
-    PerfMonitor::Get().FilterScanMonitor.Update(timer);
 }
 //---------------------------------------------------------------------------
 vector<uint64_t*> Operator::getResults()
@@ -173,11 +138,8 @@ void Join::run()
 {
     left->require(pInfo.left);
     right->require(pInfo.right);
-
     left->run();
     right->run();
-
-    Timer timer;
 
     // Use smaller input for build
     if (left->resultSize > right->resultSize)
@@ -191,7 +153,6 @@ void Join::run()
     auto rightInputData = right->getResults();
 
     // Resolve the input columns
-    Timer resolveTimer;
     unsigned resColId = 0;
     for (auto& info : requestedColumnsLeft)
     {
@@ -207,93 +168,24 @@ void Join::run()
     auto leftColId = left->resolve(pInfo.left);
     auto rightColId = right->resolve(pInfo.right);
 
-    PerfMonitor::Get().JoinResolveMonitor.Update(resolveTimer);
-
     // Build phase
-    Timer buildPhaseTimer;
     auto leftKeyColumn = leftInputData[leftColId];
     hashTable.reserve(left->resultSize * 2);
     for (uint64_t i = 0, limit = i + left->resultSize; i != limit; ++i)
     {
         hashTable.emplace(leftKeyColumn[i], i);
     }
-    PerfMonitor::Get().JoinBuildPhaseMonitor.Update(buildPhaseTimer);
-
     // Probe phase
-    Timer probePhaseTimer1;
-    BlockInfo bi(0, right->resultSize);
-
-    std::atomic<uint64_t> atmResultSize = 0;
-    std::vector<std::pair<HT::iterator, HT::iterator>> matches(
-        right->resultSize);
-    std::vector<uint64_t> matchCounts(right->resultSize);
-
     auto rightKeyColumn = rightInputData[rightColId];
-    parallel_for(
-        bi, [this, &rightKeyColumn, &matches, &atmResultSize, &matchCounts](
-                unsigned rank, uint64_t begin, uint64_t end) {
-            uint64_t localResultSize = 0;
-            for (uint64_t i = begin; i < end; ++i)
-            {
-                auto rightKey = rightKeyColumn[i];
-                matches[i] = hashTable.equal_range(rightKey);
-
-                const uint64_t matchCount =
-                    std::distance(matches[i].first, matches[i].second);
-                localResultSize += matchCount;
-
-                if (i < right->resultSize - 1)
-                    matchCounts[i + 1] = matchCount;
-            }
-            std::atomic_fetch_add(&atmResultSize, localResultSize);
-        });
-    PerfMonitor::Get().JoinProbePhaseMonitor1.Update(probePhaseTimer1);
-
-    Timer probePhaseTimer2;
-    resultSize = atmResultSize.load();
-    if (resultSize == 0)
-        return;
-
-    for (unsigned i = 1; i < right->resultSize - 1; ++i)
-        matchCounts[i + 1] += matchCounts[i];
-
-    const unsigned copyLeftSize = copyLeftData.size();
-    const unsigned copyRightSize = copyRightData.size();
-    const unsigned copyDataSize = copyLeftSize + copyRightSize;
-
-    for (auto& tmpResult : tmpResults)
+    for (uint64_t i = 0, limit = i + right->resultSize; i != limit; ++i)
     {
-        tmpResult.resize(resultSize);
+        auto rightKey = rightKeyColumn[i];
+        auto range = hashTable.equal_range(rightKey);
+        for (auto iter = range.first; iter != range.second; ++iter)
+        {
+            copy2Result(iter->second, i);
+        }
     }
-    PerfMonitor::Get().JoinProbePhaseMonitor2.Update(probePhaseTimer2);
-
-    Timer probePhaseTimer3;
-    BlockInfo bi2(0, right->resultSize, 1 << 10);
-    parallel_for(
-        bi2, [this, &matches, copyLeftSize, copyRightSize, &matchCounts](
-                unsigned rank, uint64_t begin, uint64_t end) {
-            for (uint64_t i = begin; i < end; ++i)
-            {
-                auto& range = matches[i];
-                const auto startOffset = matchCounts[i];
-
-                unsigned j = 0;
-                for (auto iter = range.first; iter != range.second; ++iter, ++j)
-                {
-                    unsigned relColId = 0;
-                    for (unsigned cId = 0; cId < copyLeftSize; ++cId)
-                        tmpResults[relColId++][startOffset + j] =
-                            copyLeftData[cId][iter->second];
-
-                    for (unsigned cId = 0; cId < copyRightSize; ++cId)
-                        tmpResults[relColId++][startOffset + j] =
-                            copyRightData[cId][i];
-                }
-            }
-        });
-
-    PerfMonitor::Get().JoinProbePhaseMonitor3.Update(probePhaseTimer3);
-    PerfMonitor::Get().JoinMonitor.Update(timer);
 }
 //---------------------------------------------------------------------------
 void SelfJoin::copy2Result(uint64_t id)
@@ -326,7 +218,6 @@ void SelfJoin::run()
     input->run();
     inputData = input->getResults();
 
-    Timer timer;
     for (auto& iu : requiredIUs)
     {
         auto id = input->resolve(iu);
@@ -337,46 +228,13 @@ void SelfJoin::run()
     auto leftColId = input->resolve(pInfo.left);
     auto rightColId = input->resolve(pInfo.right);
 
-    BlockInfo bi(0, input->resultSize);
-
-    std::atomic<uint64_t> atmResultSize = 0;
-    std::vector<std::vector<std::vector<uint64_t>>> subResults(bi.blockCount);
-    for (auto& subResult : subResults)
-        subResult.resize(tmpResults.size());
-
     auto leftCol = inputData[leftColId];
     auto rightCol = inputData[rightColId];
-    parallel_for(bi, [this, &leftCol, &rightCol, &atmResultSize, &subResults](
-                         unsigned rank, uint64_t begin, uint64_t end) {
-        uint64_t localResultSize = 0;
-        for (uint64_t i = begin; i < end; ++i)
-        {
-            if (leftCol[i] == rightCol[i])
-            {
-                for (unsigned cId = 0; cId < copyData.size(); ++cId)
-                    subResults[rank][cId].push_back(copyData[cId][i]);
-                ++localResultSize;
-            }
-        }
-        std::atomic_fetch_add(&atmResultSize, localResultSize);
-    });
-
-    for (const auto& subResult : subResults)
+    for (uint64_t i = 0; i < input->resultSize; ++i)
     {
-        const unsigned totalSize = tmpResults.size();
-
-        for (uint64_t i = 0; i < totalSize; ++i)
-        {
-            auto& tmpResult = tmpResults[i];
-            const auto& subResultCol = subResult[i];
-            tmpResult.insert(tmpResult.end(), subResultCol.begin(),
-                             subResultCol.end());
-        }
+        if (leftCol[i] == rightCol[i])
+            copy2Result(i);
     }
-
-    resultSize = atmResultSize.load();
-
-    PerfMonitor::Get().SelfJoinMonitor.Update(timer);
 }
 //---------------------------------------------------------------------------
 void Checksum::run()
@@ -389,24 +247,16 @@ void Checksum::run()
     input->run();
     auto results = input->getResults();
 
-    Timer timer;
-
-    checkSums.resize(colInfo.size());
-
-    for (uint64_t i = 0; i < colInfo.size(); ++i)
+    for (auto& sInfo : colInfo)
     {
-        auto& sInfo = colInfo[i];
         auto colId = input->resolve(sInfo);
         auto resultCol = results[colId];
-        resultSize = input->resultSize;
-
         uint64_t sum = 0;
-        for (uint64_t i = 0; i < input->resultSize; ++i)
-            sum += resultCol[i];
-
-        checkSums[i] = sum;
+        resultSize = input->resultSize;
+        for (auto iter = resultCol, limit = iter + input->resultSize;
+             iter != limit; ++iter)
+            sum += *iter;
+        checkSums.push_back(sum);
     }
-
-    PerfMonitor::Get().ChecksumMonitor.Update(timer);
 }
 //---------------------------------------------------------------------------
