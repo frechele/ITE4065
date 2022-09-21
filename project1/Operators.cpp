@@ -1,4 +1,6 @@
 #include <Operators.hpp>
+
+#include <atomic>
 #include <cassert>
 #include <iostream>
 
@@ -227,8 +229,7 @@ bool SelfJoin::require(SelectInfo info)
     return false;
 }
 //---------------------------------------------------------------------------
-void SelfJoin::runSequential()
-// Run
+void SelfJoin::processInput()
 {
     input->require(pInfo.left);
     input->require(pInfo.right);
@@ -241,6 +242,12 @@ void SelfJoin::runSequential()
         copyData.emplace_back(inputData[id]);
         select2ResultColId.emplace(iu, copyData.size() - 1);
     }
+}
+
+void SelfJoin::runSequential()
+// Run
+{
+    processInput();
 
     auto leftColId = input->resolve(pInfo.left);
     auto rightColId = input->resolve(pInfo.right);
@@ -252,13 +259,65 @@ void SelfJoin::runSequential()
         if (leftCol[i] == rightCol[i])
             copy2Result(i);
     }
+
+    std::cerr << input->resultSize << std::endl;
+}
+
+void SelfJoin::runParallel()
+{
+    processInput();
+
+    auto leftColId = input->resolve(pInfo.left);
+    auto rightColId = input->resolve(pInfo.right);
+
+    auto leftCol = inputData[leftColId];
+    auto rightCol = inputData[rightColId];
+
+    auto bi = BlockInfo::CreateMinBlock(0, input->resultSize, 1 << 9);
+    std::vector<std::vector<std::vector<std::uint64_t>>> subResults(
+        bi.blockCount, tmpResults);
+
+    std::atomic<uint64_t> atmResultSize = 0;
+
+    parallel_for(bi, [this, &subResults, &atmResultSize, &leftCol, &rightCol](
+                         unsigned rank, uint64_t beginIdx, uint64_t endIdx) {
+        auto& subResult = subResults[rank];
+
+        uint64_t localCounter = 0;
+
+        for (uint64_t i = beginIdx; i < endIdx; ++i)
+        {
+            if (leftCol[i] == rightCol[i])
+            {
+                for (unsigned cId = 0; cId < copyData.size(); ++cId)
+                {
+                    subResult[cId].push_back(copyData[cId][i]);
+                }
+
+                ++localCounter;
+            }
+        }
+
+        atmResultSize += localCounter;
+    });
+
+    for (auto& subResult : subResults)
+    {
+        for (unsigned cId = 0; cId < copyData.size(); ++cId)
+        {
+            tmpResults[cId].insert(end(tmpResults[cId]), begin(subResult[cId]),
+                                   end(subResult[cId]));
+        }
+    }
+
+    resultSize = atmResultSize.load();
 }
 
 void SelfJoin::run()
 {
     ScopedMonitor monitor(PerfMonitor::Get().SelfJoinMonitor);
 
-    runSequential();
+    runParallel();
 }
 //---------------------------------------------------------------------------
 void Checksum::processInput()

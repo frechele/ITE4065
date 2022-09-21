@@ -159,7 +159,10 @@ class SelfJoin : public Operator
     /// The input data that has to be copied
     std::vector<uint64_t*> copyData;
 
+    void processInput();
+
     void runSequential();
+    void runParallel();
 
  public:
     /// The constructor
