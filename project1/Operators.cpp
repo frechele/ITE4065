@@ -1,5 +1,6 @@
 #include <Operators.hpp>
 
+#include <memory.h>
 #include <atomic>
 #include <cassert>
 #include <iostream>
@@ -80,9 +81,8 @@ void FilterScan::run()
     BlockInfo bi(0, relation.size);
 
     std::atomic<uint64_t> atmResultSize = 0;
-    std::vector<std::vector<std::vector<uint64_t>>> subResults(bi.blockCount);
-    for (auto& subResult : subResults)
-        subResult.resize(tmpResults.size());
+    std::vector<std::vector<std::vector<uint64_t>>> subResults(bi.blockCount,
+                                                               tmpResults);
 
     parallel_for(bi, [this, &atmResultSize, &subResults](
                          unsigned rank, uint64_t begin, uint64_t end) {
@@ -211,36 +211,39 @@ void Join::run()
     BlockInfo bi(0, right->resultSize);
 
     std::atomic<uint64_t> atmResultSize = 0;
-    std::vector<std::pair<HT::iterator, HT::iterator>> matches(
-        right->resultSize);
-    std::vector<uint64_t> matchCounts(right->resultSize);
 
     auto rightKeyColumn = rightInputData[rightColId];
-    parallel_for(
-        bi, [this, &rightKeyColumn, &matches, &atmResultSize, &matchCounts](
-                unsigned rank, uint64_t begin, uint64_t end) {
-            uint64_t localResultSize = 0;
-            for (uint64_t i = begin; i < end; ++i)
+    const uint64_t rightResultSize = right->resultSize;
+
+    std::vector<std::vector<std::pair<uint64_t, uint64_t>>> matches(
+        bi.blockCount);
+    std::vector<uint64_t> offsets(bi.blockCount);
+
+    parallel_for(bi, [this, rightKeyColumn, &matches, &atmResultSize,
+                      rightResultSize,
+                      &offsets](unsigned rank, uint64_t begin, uint64_t end) {
+        uint64_t localResultSize = 0;
+        matches[rank].reserve(end - begin);
+        for (uint64_t i = begin; i < end; ++i)
+        {
+            auto rightKey = rightKeyColumn[i];
+            auto range = hashTable.equal_range(rightKey);
+
+            const uint64_t matchCount =
+                std::distance(range.first, range.second);
+            localResultSize += matchCount;
+
+            for (auto it = range.first; it != range.second; ++it)
             {
-                auto rightKey = rightKeyColumn[i];
-                matches[i] = hashTable.equal_range(rightKey);
-
-                const uint64_t matchCount =
-                    std::distance(matches[i].first, matches[i].second);
-                localResultSize += matchCount;
-
-                if (i < right->resultSize - 1)
-                    matchCounts[i + 1] = matchCount;
+                matches[rank].emplace_back(it->second, i);
             }
-            std::atomic_fetch_add(&atmResultSize, localResultSize);
-        });
+        }
+        offsets[rank] = std::atomic_fetch_add(&atmResultSize, localResultSize);
+    });
 
     resultSize = atmResultSize.load();
     if (resultSize == 0)
         return;
-
-    for (unsigned i = 1; i < right->resultSize - 1; ++i)
-        matchCounts[i + 1] += matchCounts[i];
 
     const unsigned copyLeftSize = copyLeftData.size();
     const unsigned copyRightSize = copyRightData.size();
@@ -251,28 +254,25 @@ void Join::run()
         tmpResult.resize(resultSize);
     }
 
-    parallel_for(
-        bi, [this, &matches, copyLeftSize, copyRightSize, &matchCounts](
-                unsigned rank, uint64_t begin, uint64_t end) {
-            for (uint64_t i = begin; i < end; ++i)
-            {
-                auto& range = matches[i];
-                const auto startOffset = matchCounts[i];
+    parallel_for(bi, [this, &offsets, &matches, copyLeftSize, copyRightSize](
+                         unsigned rank, uint64_t begin, uint64_t end) {
+        const uint64_t offset = offsets[rank];
 
-                unsigned j = 0;
-                for (auto iter = range.first; iter != range.second; ++iter, ++j)
-                {
-                    unsigned relColId = 0;
-                    for (unsigned cId = 0; cId < copyLeftSize; ++cId)
-                        tmpResults[relColId++][startOffset + j] =
-                            copyLeftData[cId][iter->second];
+        uint64_t j = 0;
+        for (auto it : matches[rank])
+        {
+            unsigned relColId = 0;
+            for (unsigned cId = 0; cId < copyLeftSize; ++cId)
+                tmpResults[relColId++][offset + j] =
+                    copyLeftData[cId][it.first];
 
-                    for (unsigned cId = 0; cId < copyRightSize; ++cId)
-                        tmpResults[relColId++][startOffset + j] =
-                            copyRightData[cId][i];
-                }
-            }
-        });
+            for (unsigned cId = 0; cId < copyRightSize; ++cId)
+                tmpResults[relColId++][offset + j] =
+                    copyRightData[cId][it.second];
+
+            ++j;
+        }
+    });
 }
 //---------------------------------------------------------------------------
 void SelfJoin::copy2Result(uint64_t id)
@@ -318,36 +318,45 @@ void SelfJoin::run()
     BlockInfo bi(0, input->resultSize);
 
     std::atomic<uint64_t> atmResultSize = 0;
-    std::vector<std::vector<std::vector<uint64_t>>> subResults(bi.blockCount);
-    for (auto& subResult : subResults)
-        subResult.resize(tmpResults.size());
+    std::vector<std::vector<std::vector<uint64_t>>> subResults(bi.blockCount,
+                                                               tmpResults);
 
     auto leftCol = inputData[leftColId];
     auto rightCol = inputData[rightColId];
-    parallel_for(bi, [this, &leftCol, &rightCol, &atmResultSize, &subResults](
-                         unsigned rank, uint64_t begin, uint64_t end) {
-        uint64_t localResultSize = 0;
-        for (uint64_t i = begin; i < end; ++i)
-        {
-            if (leftCol[i] == rightCol[i])
+    const uint64_t copyDataSize = copyData.size();
+    parallel_for(
+        bi, [this, leftCol, rightCol, &atmResultSize, &subResults,
+             copyDataSize](unsigned rank, uint64_t begin, uint64_t end) {
+            uint64_t localResultSize = 0;
+            for (uint64_t i = begin; i < end; ++i)
             {
-                for (unsigned cId = 0; cId < copyData.size(); ++cId)
-                    subResults[rank][cId].push_back(copyData[cId][i]);
-                ++localResultSize;
+                if (leftCol[i] == rightCol[i])
+                {
+                    for (unsigned cId = 0; cId < copyDataSize; ++cId)
+                        subResults[rank][cId].push_back(copyData[cId][i]);
+                    ++localResultSize;
+                }
             }
-        }
-        std::atomic_fetch_add(&atmResultSize, localResultSize);
-    });
-
-    for (const auto& subResult : subResults)
-    {
-        const unsigned totalSize = tmpResults.size();
-        for (unsigned i = 0; i < totalSize; ++i)
-            tmpResults[i].insert(end(tmpResults[i]), begin(subResult[i]),
-                                 end(subResult[i]));
-    }
+            std::atomic_fetch_add(&atmResultSize, localResultSize);
+        });
 
     resultSize = atmResultSize.load();
+
+    for (auto& tmpResult : tmpResults)
+        tmpResult.resize(resultSize);
+
+    const unsigned totalSize = tmpResults.size();
+    std::vector<uint64_t> offsets(totalSize);
+    for (const auto& subResult : subResults)
+    {
+        for (unsigned i = 0; i < totalSize; ++i)
+        {
+            const uint64_t subSize = subResult[i].size();
+            memcpy(&tmpResults[i][offsets[i]], subResult[i].data(),
+                   subSize * sizeof(uint64_t));
+            offsets[i] += subSize;
+        }
+    }
 }
 //---------------------------------------------------------------------------
 void Checksum::run()
@@ -362,18 +371,25 @@ void Checksum::run()
 
     checkSums.resize(colInfo.size());
 
-    for (uint64_t i = 0; i < colInfo.size(); ++i)
+    const uint64_t colInfoSize = colInfo.size();
+    for (uint64_t i = 0; i < colInfoSize; ++i)
     {
         auto& sInfo = colInfo[i];
         auto colId = input->resolve(sInfo);
         auto resultCol = results[colId];
-        resultSize = input->resultSize;
 
-        uint64_t sum = 0;
-        for (auto iter = resultCol, limit = iter + input->resultSize;
-             iter != limit; ++iter)
-            sum += *iter;
-        checkSums[i] = sum;
+        std::atomic<uint64_t> sum = 0;
+
+        BlockInfo bi(0, input->resultSize);
+        parallel_for(bi, [this, resultCol, &sum] (unsigned rank, uint64_t beginIdx, uint64_t endIdx) {
+            uint64_t localSum = 0;
+            for (uint64_t i = beginIdx; i < endIdx; ++i)
+                localSum += resultCol[i];
+            std::atomic_fetch_add(&sum, localSum);
+        });
+
+        checkSums[i] = sum.load();
     }
+    resultSize = input->resultSize;
 }
 //---------------------------------------------------------------------------
