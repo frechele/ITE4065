@@ -11,6 +11,39 @@
 
 using TaskFuture = std::future<void>;
 
+struct BlockInfo final
+{
+    BlockInfo(std::uint64_t begin_, std::uint64_t end_,
+              unsigned minimumBlockSize = 1024)
+        : begin(begin_), end(end_), workSize(end - begin)
+    {
+        assert(begin <= end);
+        assert(minimumBlockSize > 0);
+
+        blockCount = std::thread::hardware_concurrency();
+        blockSize = workSize / blockCount;
+
+        if (blockSize < minimumBlockSize)
+        {
+            blockCount = workSize / minimumBlockSize;
+            blockSize = minimumBlockSize;
+        }
+
+        if (blockCount == 0)
+        {
+            blockCount = 1;
+            blockSize = workSize;
+        }
+    }
+
+    const std::uint64_t begin;
+    const std::uint64_t end;
+    const unsigned workSize;
+
+    unsigned blockCount;
+    unsigned blockSize;
+};
+
 class ThreadPool final
 {
  public:
@@ -58,6 +91,31 @@ class ThreadPool final
         cv_.notify_one();
 
         return future;
+    }
+
+    template <typename Func>
+    std::vector<TaskFuture> ParallelFor(const BlockInfo& bi, Func&& f)
+    {
+        std::vector<TaskFuture> futures(bi.blockCount);
+
+        mutex_.lock();
+        for (unsigned blockID = 0; blockID < bi.blockCount; ++blockID)
+        {
+            const unsigned blockBegin = bi.begin + blockID * bi.blockSize;
+            const unsigned blockEnd = (blockID == bi.blockCount - 1)
+                                          ? bi.end
+                                          : blockBegin + bi.blockSize;
+
+            auto task = std::make_shared<std::packaged_task<void()>>(std::bind(
+                std::forward<Func>(f), blockID, blockBegin, blockEnd));
+
+            futures[blockID] = task->get_future();
+            tasks_.emplace_back([task] { (*task)(); });
+        }
+        mutex_.unlock();
+
+        cv_.notify_all();
+        return futures;
     }
 
  private:
@@ -114,39 +172,6 @@ class ThreadPool final
     std::condition_variable cv_;
 };
 
-struct BlockInfo final
-{
-    BlockInfo(std::uint64_t begin_, std::uint64_t end_,
-              unsigned minimumBlockSize = 1024)
-        : begin(begin_), end(end_), workSize(end - begin)
-    {
-        assert(begin <= end);
-        assert(minimumBlockSize > 0);
-
-        blockCount = ThreadPool::Get().NWORKER;
-        blockSize = workSize / blockCount;
-
-        if (blockSize < minimumBlockSize)
-        {
-            blockCount = workSize / minimumBlockSize;
-            blockSize = minimumBlockSize;
-        }
-
-        if (blockCount == 0)
-        {
-            blockCount = 1;
-            blockSize = workSize;
-        }
-    }
-
-    const std::uint64_t begin;
-    const std::uint64_t end;
-    const unsigned workSize;
-
-    unsigned blockCount;
-    unsigned blockSize;
-};
-
 template <typename Func, typename... Args>
 void parallel_for(const BlockInfo& bi, Func&& f, Args&&... args)
 {
@@ -156,16 +181,7 @@ void parallel_for(const BlockInfo& bi, Func&& f, Args&&... args)
         return;
     }
 
-    std::vector<TaskFuture> futures(bi.blockCount);
-    for (unsigned blockID = 0; blockID < bi.blockCount; ++blockID)
-    {
-        const unsigned blockBegin = bi.begin + blockID * bi.blockSize;
-        const unsigned blockEnd =
-            (blockID == bi.blockCount - 1) ? bi.end : blockBegin + bi.blockSize;
-
-        futures[blockID] =
-            ThreadPool::Get().Submit(f, blockID, blockBegin, blockEnd);
-    }
+    auto futures = ThreadPool::Get().ParallelFor(bi, std::forward<Func>(f));
 
     for (auto& future : futures)
         future.wait();

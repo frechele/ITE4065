@@ -7,14 +7,11 @@
 #include "Parser.hpp"
 
 #include "ThreadPool.hpp"
-#include "PerfMonitor.hpp"
 
 using namespace std;
 //---------------------------------------------------------------------------
 int main(int argc, char* argv[])
 {
-    PerfMonitor perf;
-
     ThreadPool pool;
     pool.SetAsMainPool();
 
@@ -56,18 +53,14 @@ int main(int argc, char* argv[])
 
         batchTP.Submit(
             [promise, &joiner](std::string query) {
-                Timer queryTimer;
                 QueryInfo i;
                 i.parseQuery(query);
-                PerfMonitor::Get().QueryParsingMonitor.Update(queryTimer.Elapsed());
 
                 promise->set_value(joiner.join(i));
             }, std::move(line));
 
         ++turn;
     }
-
-    PerfMonitor::Get().DumpMonitor();
 
     return 0;
 }
