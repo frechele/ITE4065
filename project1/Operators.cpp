@@ -389,23 +389,19 @@ void Checksum::run()
 
     checkSums.resize(colInfo.size());
 
-    BlockInfo bi(0, colInfo.size());
-    parallel_for(
-        bi, [this, &results](unsigned rank, uint64_t begin, uint64_t end) {
-            for (uint64_t i = begin; i < end; ++i)
-            {
-                auto& sInfo = colInfo[i];
-                auto colId = input->resolve(sInfo);
-                auto resultCol = results[colId];
-                resultSize = input->resultSize;
+    for (uint64_t i = 0; i < colInfo.size(); ++i)
+    {
+        auto& sInfo = colInfo[i];
+        auto colId = input->resolve(sInfo);
+        auto resultCol = results[colId];
+        resultSize = input->resultSize;
 
-                uint64_t sum = 0;
-                for (auto iter = resultCol, limit = iter + input->resultSize;
-                     iter != limit; ++iter)
-                    sum += *iter;
-                checkSums[i] = sum;
-            }
-        });
+        uint64_t sum = 0;
+        for (auto iter = resultCol, limit = iter + input->resultSize;
+             iter != limit; ++iter)
+            sum += *iter;
+        checkSums[i] = sum;
+    }
 
     PerfMonitor::Get().ChecksumMonitor.Update(timer.Elapsed());
 }
