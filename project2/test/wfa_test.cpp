@@ -3,6 +3,8 @@
 #include "wfa.hpp"
 
 #include <random>
+#include <vector>
+#include <thread>
 
 TEST(StampedSnap, Initialize)
 {
@@ -47,7 +49,7 @@ TEST(WFASnapshot, Initialize)
     }
 }
 
-TEST(WFASnapshot, SingleWriter)
+TEST(WFASnapshot, SingleThread)
 {
     std::random_device rd;
     std::mt19937 engine(rd());
@@ -60,5 +62,35 @@ TEST(WFASnapshot, SingleWriter)
         wfa.Update(0, value);
 
         EXPECT_EQ(wfa.Scan()[0], value);
+    }
+}
+
+TEST(WFASnapshot, MultiThread)
+{
+    std::random_device rd;
+
+    WFASnapshot wfa(4, 0);
+
+    std::vector<std::thread> workers(4);
+    for (int i = 0; i < 4; ++i)
+    {
+        workers[i] = std::thread([&wfa](int rank) {
+            for (int j = 0; j < 10; ++j)
+            {
+                wfa.Update(rank, j * rank);
+            }
+        }, i);
+    }
+
+    for (auto& worker : workers)
+    {
+        if (worker.joinable())
+            worker.join();
+    }
+
+    SnapT snap = wfa.Scan();
+    for (int i = 0; i < 4; ++i)
+    {
+        EXPECT_EQ(snap[i], 9 * i);
     }
 }
