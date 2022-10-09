@@ -8,12 +8,16 @@ using SnapT = std::vector<std::int64_t>;
 class StampedSnap final
 {
  public:
+    using Arr = std::vector<StampedSnap>;
+
+ public:
+    StampedSnap() = default;
     StampedSnap(std::int64_t value);
     StampedSnap(std::uint64_t stamp, std::int64_t value, SnapT snap);
 
-    const std::uint64_t Stamp;
-    const std::int64_t Value;
-    const SnapT Snap;
+    std::uint64_t Stamp;
+    std::int64_t Value;
+    SnapT Snap;
 };
 
 class WFASnapshot final
@@ -27,5 +31,8 @@ class WFASnapshot final
     SnapT Scan();
 
  private:
-    std::vector<StampedSnap> table_;
+    StampedSnap::Arr collect();
+
+ private:
+    StampedSnap::Arr table_;
 };

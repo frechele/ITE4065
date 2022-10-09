@@ -21,10 +21,53 @@ int WFASnapshot::GetCapacity() const
 
 void WFASnapshot::Update(int rank, std::int64_t value)
 {
-
 }
 
 SnapT WFASnapshot::Scan()
 {
-    return SnapT();
+    StampedSnap::Arr oldCopy, newCopy;
+
+    oldCopy = collect();
+
+    const int capacity = GetCapacity();
+
+    std::vector<int> moved(capacity);
+    while (true)
+    {
+        newCopy = collect();
+        bool pass = false;
+
+        for (int i = 0; i < capacity; ++i)
+        {
+            if (oldCopy[i].Stamp != newCopy[i].Stamp)
+            {
+                if (moved[i])
+                {
+                    return newCopy[i].Snap;
+                }
+
+                moved[i] = true;
+                oldCopy = newCopy;
+
+                pass = true;
+                break;
+            }
+        }
+
+        if (!pass)
+        {
+            SnapT result(capacity);
+            for (int i = 0; i < capacity; ++i)
+            {
+                result[i] = newCopy[i].Value;
+            }
+            return result;
+        }
+    }
+}
+
+StampedSnap::Arr WFASnapshot::collect()
+{
+    StampedSnap::Arr copy(table_);
+    return copy;
 }
