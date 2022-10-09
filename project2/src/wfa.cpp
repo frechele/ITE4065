@@ -21,6 +21,11 @@ int WFASnapshot::GetCapacity() const
 
 void WFASnapshot::Update(int rank, std::int64_t value)
 {
+    SnapT snap = Scan();
+
+    StampedSnap oldValue = table_[rank];
+    StampedSnap newValue(oldValue.Stamp + 1, value, snap);
+    table_[rank] = std::move(newValue);
 }
 
 SnapT WFASnapshot::Scan()
