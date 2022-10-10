@@ -14,6 +14,9 @@ set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin)
 # Options
 option(BUILD_TESTS "Build unit tests" ON)
 
+# Dependencies
+find_package(Threads REQUIRED)
+
 # Sources
 set(AS_SOURCES_DIR src)
 set(AS_SOURCES
@@ -30,8 +33,8 @@ include_directories(${AS_HEADERS_DIR})
 
 add_library(wfa STATIC ${AS_SOURCES} ${AS_HEADERS})
 
-add_executable(run ${AS_SOURCES_DIR}/main.cpp)
-target_link_libraries(run wfa)
+add_executable(run ${AS_SOURCES_DIR}/main.cpp ${AS_SOURCES_DIR}/run.cpp)
+target_link_libraries(run wfa ${CMAKE_THREAD_LIBS_INIT})
 
 if(BUILD_TESTS)
     add_subdirectory(test)
