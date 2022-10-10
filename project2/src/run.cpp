@@ -67,8 +67,9 @@ std::uint64_t run(int numWorkers)
 
     flag = false;
 
+    std::vector<std::uint64_t> counterSnap(counter);
     std::uint64_t total = 0;
-    for (const auto v : counter)
+    for (const auto v : counterSnap)
         total += v;
 
     for (auto& worker : workers)
