@@ -11,9 +11,11 @@ class StampedSnap final
     using Arr = std::vector<StampedSnap>;
 
  public:
-    StampedSnap() = default;
-    StampedSnap(std::int64_t value);
+    StampedSnap(int capacity, std::int64_t value);
     StampedSnap(std::uint64_t stamp, std::int64_t value, SnapT snap);
+
+    StampedSnap(const StampedSnap&) = default;
+    StampedSnap& operator=(const StampedSnap&) = default;
 
     std::uint64_t Stamp;
     std::int64_t Value;

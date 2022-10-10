@@ -1,6 +1,7 @@
 #include "wfa.hpp"
 
-StampedSnap::StampedSnap(std::int64_t value) : Stamp(0), Value(value)
+StampedSnap::StampedSnap(int capacity, std::int64_t value)
+    : Stamp(0), Value(value), Snap(capacity, value)
 {
 }
 
@@ -10,7 +11,7 @@ StampedSnap::StampedSnap(std::uint64_t stamp, std::int64_t value, SnapT snap)
 }
 
 WFASnapshot::WFASnapshot(int capacity, std::int64_t initValue)
-    : table_(capacity, initValue)
+    : table_(capacity, StampedSnap(capacity, initValue))
 {
 }
 

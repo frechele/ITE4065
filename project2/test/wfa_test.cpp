@@ -13,11 +13,13 @@ TEST(StampedSnap, Initialize)
 
     const std::int64_t value = engine();
 
-    StampedSnap snap(value);
+    StampedSnap snap(4, value);
 
     EXPECT_EQ(snap.Stamp, 0);
     EXPECT_EQ(snap.Value, value);
-    EXPECT_TRUE(snap.Snap.empty());
+    EXPECT_EQ(snap.Snap.size(), 4);
+    for (int i = 0; i < 4; ++i)
+        EXPECT_EQ(snap.Snap[i], value);
 
     const std::int64_t value2 = engine();
     SnapT tmp = { 1, 2, 3, 4 };
