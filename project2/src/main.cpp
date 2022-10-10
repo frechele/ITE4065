@@ -35,5 +35,5 @@ int main(int argc, char** argv)
 
     const auto count = run(numWorkers);
 
-    cout << "total: " << count << endl;
+    cout << "#worker: " << numWorkers << " total: " << count << endl;
 }
