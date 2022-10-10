@@ -26,10 +26,10 @@ void WFASnapshot::Update(int rank, std::int64_t value)
 
     StampedSnap oldValue = table_[rank];
     StampedSnap newValue(oldValue.Stamp + 1, value, snap);
-    table_[rank] = std::move(newValue);
+    table_[rank] = newValue;
 }
 
-SnapT WFASnapshot::Scan()
+SnapT WFASnapshot::Scan() const
 {
     StampedSnap::Arr oldCopy, newCopy;
 
@@ -53,7 +53,7 @@ SnapT WFASnapshot::Scan()
                 }
 
                 moved[i] = true;
-                oldCopy = newCopy;
+                oldCopy = std::move(newCopy);
 
                 pass = true;
                 break;
@@ -72,8 +72,7 @@ SnapT WFASnapshot::Scan()
     }
 }
 
-StampedSnap::Arr WFASnapshot::collect()
+StampedSnap::Arr WFASnapshot::collect() const
 {
-    StampedSnap::Arr copy(table_);
-    return copy;
+    return table_;
 }

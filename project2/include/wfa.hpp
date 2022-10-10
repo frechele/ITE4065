@@ -30,10 +30,10 @@ class WFASnapshot final
     int GetCapacity() const;
 
     void Update(int rank, std::int64_t value);
-    SnapT Scan();
+    SnapT Scan() const;
 
  private:
-    StampedSnap::Arr collect();
+    StampedSnap::Arr collect() const;
 
  private:
     StampedSnap::Arr table_;
