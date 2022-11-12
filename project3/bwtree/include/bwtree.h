@@ -6957,7 +6957,7 @@ class BwTree : public BwTreeBase {
     BwTree *tree_p;
 
     // Garbage collection interval (milliseconds)
-    constexpr static int GC_INTERVAL = 50;
+    inline static int GC_INTERVAL = 50;
 
     /*
      * struct GarbageNode - A linked list of garbages
