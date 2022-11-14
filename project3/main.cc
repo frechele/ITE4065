@@ -82,19 +82,22 @@ void uniformFindWorkload(uint32_t id, uint32_t key_num,
 }
 
 int main(int argc, char *argv[]) {
-  if (argc != 3)
+  if (argc != 6)
   {
-    std::cout << "usage: " << argv[0] << " <gc_interval> <writer ratio>" << std::endl;
+    std::cout << "usage: " << argv[0] << " <gc_interval> <writer ratio> <data size> <write skewed> <read skewed>" << std::endl;
     return -1;
   }
 
   test::BwTreeTestUtil::TreeType::EpochManager::GC_INTERVAL = std::atoi(argv[1]);
   const double writer_ratio = std::atof(argv[2]);
+  const int data_size = std::atoi(argv[3]);
+  const bool write_skewed = std::atoi(argv[4]);
+  const bool read_skewed = std::atoi(argv[5]);
 
   const uint32_t num_threads_ = 20;
 
   // This defines the key space (0 ~ (10M - 1))
-  const uint32_t key_num = 10 * 1024 * 1024;
+  const uint32_t key_num = data_size * 1024 * 1024;
 
   common::WorkerPool thread_pool(num_threads_, {});
   thread_pool.Startup();
@@ -112,11 +115,25 @@ int main(int argc, char *argv[]) {
     
     if (id < num_write_workers)
     {
-      op_cnt = uniformInsertWorkload(id, key_num, tree);
+      if (write_skewed)
+      {
+        op_cnt = skewedInsertWorkload(id, key_num, tree);
+      }
+      else
+      {
+        op_cnt = uniformInsertWorkload(id, key_num, tree);
+      }
     }
     else
     {
-      skewedFindWorkload(id, key_num, tree);
+      if (read_skewed)
+      {
+        skewedFindWorkload(id, key_num, tree);
+      }
+      else
+      {
+        uniformFindWorkload(id, key_num, tree);
+      }
     }
     
     tree->UnregisterThread(gcid);
@@ -134,7 +151,7 @@ int main(int argc, char *argv[]) {
 
   double ops = total_op_counter.load() / (timer.GetElapsed() / 1000.0);
   double success_ops = insert_success_counter.load() / (timer.GetElapsed() / 1000.0);
-  std::cout << std::fixed << "10M Insert(): " << timer.GetElapsed() << " (ms), "
+  std::cout << std::fixed << data_size << "M Insert(): " << timer.GetElapsed() << " (ms), "
     << "write throughput: " << ops << " (op/s), "
     << "successive write throughput: " << success_ops << " (op/s)" << std::endl;
 
@@ -146,6 +163,7 @@ int main(int argc, char *argv[]) {
   std::cout << "write throughput: " << ops / num_threads_ << " (op/s)" << std::endl;
   std::cout << "successive write throughput: " << success_ops / num_threads_ << " (op/s)" << std::endl;
   std::cout << "read throughput: " << read_ops / num_threads_ << " (op/s)" << std::endl;
+  std::cout << "garbage length mu: " << test::BwTreeTestUtil::TreeType::EpochManager::GARBAGE_LENGTH_MEAN << std::endl;
 
   delete tree;
 

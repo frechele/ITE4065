@@ -6959,6 +6959,9 @@ class BwTree : public BwTreeBase {
     // Garbage collection interval (milliseconds)
     inline static int GC_INTERVAL = 50;
 
+    inline static double GARBAGE_LENGTH_MEAN = 0;
+    inline static uint64_t GARBAGE_LENGTH_COUNT = 0;
+
     /*
      * struct GarbageNode - A linked list of garbages
      */
@@ -7506,6 +7509,8 @@ class BwTree : public BwTreeBase {
     NO_ASAN void ClearEpoch() {
       INDEX_LOG_TRACE("Start to clear epoch");
 
+      uint64_t node_lengths = 0;
+
       while (1) {
         // Even if current_epoch_p is nullptr, this should work
         if (head_epoch_p == current_epoch_p) {
@@ -7566,6 +7571,8 @@ class BwTree : public BwTreeBase {
           // This invalidates any further reference to its
           // members (so we saved next pointer above)
           delete garbage_node_p;
+
+          ++node_lengths;
         }  // for
 
         // First need to save this in order to delete current node
@@ -7585,6 +7592,9 @@ class BwTree : public BwTreeBase {
         // pointer to nullptr
         head_epoch_p = next_epoch_node_p;
       }  // while(1) through epoch nodes
+
+      ++GARBAGE_LENGTH_COUNT;
+      GARBAGE_LENGTH_MEAN = GARBAGE_LENGTH_MEAN + 1. / GARBAGE_LENGTH_COUNT * (node_lengths - GARBAGE_LENGTH_MEAN);
     }
 
     /*
