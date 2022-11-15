@@ -19,7 +19,7 @@ uint32_t skewedInsertWorkload(uint32_t id, uint32_t key_num,
   test::BwTreeTestUtil::TreeType* tree)
 {
   std::default_random_engine thread_generator(id);
-  std::normal_distribution<double> dist(0, 0.2);
+  std::normal_distribution<double> dist(0, 0.01);
   std::uniform_int_distribution<int> value_dist(0, key_num);
   uint32_t op_cnt = 0;
 
