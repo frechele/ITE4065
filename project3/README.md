@@ -21,7 +21,12 @@ All executions are performed in the environment described below.
 - RAM: DDR4 128GB
 - g++ 9.4.0
 
-In order to reduce the deviation according to the state of the computing node and randomness, the result was obtained by performing 10 times for each setting.
+The correlation between gc interval and throughput was investigated in various situations.
+There are three major variables: writer ratio and insertion/find key distributions.
+Writer ratio is the ratio of threads that only insert among several worker threads.
+If x% of workers only insert, (100-x)% of workers only find some key.
+Skewed distribution produces keys that sampled from Gaussian distribution that mean is 0 and standard deviation is 0.01. 
+In order to reduce the deviation according to the state of the computing node and randomness, the results were obtained by performing 10 times for each setting.
 
 ![corr_fig](resource/corr_fig.png)
 ▲ Figure 1) 
