@@ -24,6 +24,7 @@ set(BWTREE_HEADERS
   # Add your headers here
   # ${BWTREE_HEADER_DIR}/foo/bar/your_header.h
   ${BWTREE_HEADER_DIR}/stats.h
+  ${BWTREE_HEADER_DIR}/tdist.def
   )
 
 add_library(bwtree STATIC ${BWTREE_HEADERS} ${BWTREE_SOURCES})
