@@ -11,6 +11,7 @@
 #include <algorithm>
 #include <array>
 #include <atomic>
+#include <cmath>
 #include <chrono>  // NOLINT
 #include <cinttypes>
 #include <cstddef>  // offsetof() is defined here
@@ -21,12 +22,14 @@
 #include <utility>
 #include <vector>
 #include <mutex>
+#include <iostream>
 
 #include "atomic_stack.h"
 #include "bloom_filter.h"
 #include "sorted_small_set.h"
 #include "macros.h"
 #include "index_logger.h"
+#include "stats.h"
 
 #ifndef NDEBUG
 /*
@@ -6958,8 +6961,12 @@ class BwTree : public BwTreeBase {
 
     // Garbage collection interval (milliseconds)
     inline static int GC_INTERVAL = 50;
+    static constexpr int MAX_GC_INTERVAL = 1000;
+    static constexpr int MIN_GC_INTERVAL = 10;
 
     inline static double GARBAGE_LENGTH_MEAN = 0;
+    inline static double GARBAGE_LENGTH_SQ_MEAN = 0;
+    inline static double GARBAGE_LENGTH_LATEST = 0;
     inline static uint64_t GARBAGE_LENGTH_COUNT = 0;
 
     /*
@@ -7152,6 +7159,31 @@ class BwTree : public BwTreeBase {
       }
     }
 
+    NO_ASAN void UpdateConfig() {
+      const double zValue = LookupZTable(GARBAGE_LENGTH_COUNT);
+      const double variance = GARBAGE_LENGTH_SQ_MEAN - GARBAGE_LENGTH_MEAN * GARBAGE_LENGTH_MEAN;
+      const double confidenceBound = zValue * std::sqrt(variance / GARBAGE_LENGTH_COUNT);
+
+      // upper/lower confidence bounds
+      const double ucb = GARBAGE_LENGTH_MEAN + confidenceBound;
+      const double lcb = GARBAGE_LENGTH_MEAN - confidenceBound;
+
+      int newGCInterval = GC_INTERVAL;
+      if (GARBAGE_LENGTH_LATEST > ucb)
+      {
+        newGCInterval /= 2.;
+        std::cerr << "GC interval is halved to " << newGCInterval << std::endl;
+      } 
+      else if (GARBAGE_LENGTH_LATEST < lcb)
+      {
+        newGCInterval += 10;
+        std::cerr << "GC interval is increased to " << newGCInterval << std::endl;
+      }
+
+      // clipping gc interval
+      GC_INTERVAL = std::min(std::max(newGCInterval, MIN_GC_INTERVAL), MAX_GC_INTERVAL);
+    }
+
     /*
      * CreateNewEpoch() - Create a new epoch node
      *
@@ -7282,6 +7314,7 @@ class BwTree : public BwTreeBase {
     NO_ASAN void PerformGarbageCollection() {
       ClearEpoch();
       CreateNewEpoch();
+      UpdateConfig();
     }
 
 #else  // #ifdef USE_OLD_EPOCH
@@ -7595,6 +7628,8 @@ class BwTree : public BwTreeBase {
 
       ++GARBAGE_LENGTH_COUNT;
       GARBAGE_LENGTH_MEAN = GARBAGE_LENGTH_MEAN + 1. / GARBAGE_LENGTH_COUNT * (node_lengths - GARBAGE_LENGTH_MEAN);
+      GARBAGE_LENGTH_SQ_MEAN = GARBAGE_LENGTH_SQ_MEAN + 1. / GARBAGE_LENGTH_COUNT * (node_lengths * node_lengths - GARBAGE_LENGTH_SQ_MEAN);
+      GARBAGE_LENGTH_LATEST = node_lengths;
     }
 
     /*
