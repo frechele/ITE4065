@@ -4,6 +4,7 @@ set(BWTREE_SOURCES
   ${BWTREE_SOURCE_DIR}/bwtree.cc
   # Add your sources here
   # ${BWTREE_SOURCE_DIR}/foo/bar/your_source.cc
+  ${BWTREE_SOURCE_DIR}/stats.cc
   )
 
 # Headers
@@ -22,6 +23,7 @@ set(BWTREE_HEADERS
   ${BWTREE_HEADER_DIR}/zipf.h
   # Add your headers here
   # ${BWTREE_HEADER_DIR}/foo/bar/your_header.h
+  ${BWTREE_HEADER_DIR}/stats.h
   )
 
 add_library(bwtree STATIC ${BWTREE_HEADERS} ${BWTREE_SOURCES})
