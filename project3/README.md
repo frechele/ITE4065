@@ -76,7 +76,7 @@ Hence, the writer ratio can be approximated by the number of garbage nodes in th
 Since that value is accessed only from the epoch manager thread, there is no problem that may exist in a direct method.
 
 ![garbage length](resource/garbage_size.png)
-Figure2) Boxplot of garbage length according to writer ratio.
+Figure 2) Boxplot of garbage length according to writer ratio.
 
 In Figure2, there is a correlation between garbage length and writer ratio.
 The Pearson correlation coefficient between them is about 0.34.
@@ -96,9 +96,46 @@ A brief description of the controller algorithm is described below.
 
 1. Get garbage length for every epoch.
 2. If the garbage length of current epoch is larger than upper confidence bound, reduce gc interval by half.
-3. If the garbage length of current epoch is lower than lower confidence bound, add positive constant to gc interval.
-4. Update garbage length distribution (assume that the distribution is Gaussian).
-5. Clip the gc interval so that it is within a specific range.
+3. Update garbage length distribution (assume that the distribution is Gaussian).
+4. Clip the gc interval so that it is within a specific range.
 
-According to the above algorithm, when the number of writers increases, it will be possible to quickly respond and increase write throughput.
+According to the above algorithm, when the number of writrs increases, it will be possible to quickly respond and increase write throughput.
 Since the reader is relatively less sensitive to the gc interval, I believe that the performance of the entire system can be improved by linearly increasing the gc interval.
+
+## Details of implementations
+
+The relative difference between the garbage length in the previous epoch and the garbage length in the current epoch is tracked to determine whether the garbage length was increased.
+To make the expected bound, I used student-t distribution with α=0.8 to get z-value that determines the length of the expection interval.
+The upper bound of the expection is as follows:
+
+> ucb =  μ + z × σ / sqrt(n)
+
+where μ is the average of the relative difference σ is the standard derivation of the relative difference, and n is the number of samples.
+If the garbege length is larger than ucb, reduce gc interval by half.
+In other case, increase gc interval linearly.
+
+## Test cases
+
+Because the difference between my design and original Open BwTree is that gc interval is changed or not, there is no possibility that correctness is broken.
+Hence, I didn't make some test cases for testing the correctness.
+
+## Results
+
+In this section, I will describe the results of my design implementation.
+All tests were conducted under the same conditions as when the original version was tested.
+Please check the [Experiment](#experiment) section for the test cases for performance testing.
+
+![Perf cumulative plot](resource/perf_cummulative.png)
+Figure 3) Cumulative histogram about read/write throughputs. gc_interval=0 means using gc controlling strategy and gc_interval=1 means using constant gc interval.
+
+Figure 3 shows that gc controlling strategy slightly improves read/write throughput against original.
+On average, writing improved by about 0.25%, and reading decreased by about 0.5%.
+However, the median value of throughput increased by about 0.2% for writing, and about 2% for reading.
+The minimum value increased by about 0.05% for writing and 5.7% for reading.
+In summary, overall, the lower bound of performance is increased.
+
+![GC interval controlling](resource/gcinterval.png)
+Figure 4) GC interval controlling according to writer ratio.
+
+In experiment section, I checked that the larger the writer ratio, the smaller gc interval should be.
+Figure 4 shows that my algorithm generally works well according to the lessons learned from the experimental results.
