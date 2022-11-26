@@ -88,11 +88,17 @@ int main(int argc, char *argv[]) {
     return -1;
   }
 
-  test::BwTreeTestUtil::TreeType::EpochManager::GC_INTERVAL = std::atoi(argv[1]);
+  const double gc_interval = std::stod(argv[1]);
   const double writer_ratio = std::atof(argv[2]);
   const int data_size = std::atoi(argv[3]);
   const bool write_skewed = std::atoi(argv[4]);
   const bool read_skewed = std::atoi(argv[5]);
+
+  if (gc_interval > 0)
+  {
+    test::BwTreeTestUtil::TreeType::EpochManager::GC_CONTROLLER_ENABLE = false;
+    test::BwTreeTestUtil::TreeType::EpochManager::GC_INTERVAL = std::atoi(argv[1]);
+  }
 
   const uint32_t num_threads_ = 20;
 
@@ -163,7 +169,7 @@ int main(int argc, char *argv[]) {
   std::cout << "write throughput: " << ops / num_threads_ << " (op/s)" << std::endl;
   std::cout << "successive write throughput: " << success_ops / num_threads_ << " (op/s)" << std::endl;
   std::cout << "read throughput: " << read_ops / num_threads_ << " (op/s)" << std::endl;
-  std::cout << "garbage length mu: " << test::BwTreeTestUtil::TreeType::EpochManager::GARBAGE_LENGTH_MEAN << std::endl;
+  std::cout << "garbage length mu: " << test::BwTreeTestUtil::TreeType::EpochManager::GARBAGE_LENGTH_LATEST << std::endl;
 
   delete tree;
 
