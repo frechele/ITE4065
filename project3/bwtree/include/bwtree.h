@@ -7170,8 +7170,6 @@ class BwTree : public BwTreeBase {
     }
 
     NO_ASAN void UpdateConfig() {
-      const double diffRatio = (GARBAGE_LENGTH_LATEST - GARBAGE_LENGTH_PREVIOUS) / GARBAGE_LENGTH_PREVIOUS;
- 
       const double zValue = LookupZTable(GARBAGE_LENGTH_COUNT);
       const double variance = GARBAGE_LENGTH_DIFF_SQ_MEAN - GARBAGE_LENGTH_DIFF_MEAN * GARBAGE_LENGTH_DIFF_MEAN;
       const double confidenceBound = zValue * std::sqrt(variance / GARBAGE_LENGTH_COUNT);
@@ -7185,25 +7183,21 @@ class BwTree : public BwTreeBase {
       {
         newGCInterval /= 2.;
         GC_INTERVAL_SIGN = -1;
-        //std::cerr << "GC interval is halved to " << newGCInterval << std::endl;
         ClearStats();
       } 
-      else if (GARBAGE_LENGTH_LATEST < lcb)
-      {
-        newGCInterval += 10;
-        GC_INTERVAL_SIGN = 1;
-        //std::cerr << "GC interval is doubled to " << newGCInterval << std::endl;
-      }
       else
       {
+        newGCInterval += 10;
         ++GARBAGE_LENGTH_COUNT;
-        GARBAGE_LENGTH_DIFF_MEAN = GARBAGE_LENGTH_DIFF_MEAN + 1. / GARBAGE_LENGTH_COUNT * (diffRatio - GARBAGE_LENGTH_DIFF_MEAN);
+        GARBAGE_LENGTH_DIFF_MEAN = GARBAGE_LENGTH_DIFF_MEAN + 1. / GARBAGE_LENGTH_COUNT * (GARBAGE_LENGTH_LATEST - GARBAGE_LENGTH_DIFF_MEAN);
         GARBAGE_LENGTH_DIFF_SQ_MEAN = GARBAGE_LENGTH_DIFF_SQ_MEAN + 1. / GARBAGE_LENGTH_COUNT *
-                                      (diffRatio * diffRatio - GARBAGE_LENGTH_DIFF_SQ_MEAN);
+                                      (GARBAGE_LENGTH_LATEST * GARBAGE_LENGTH_LATEST - GARBAGE_LENGTH_DIFF_SQ_MEAN);
       }
 
       // clipping gc interval
       GC_INTERVAL = std::min(std::max(newGCInterval, MIN_GC_INTERVAL), MAX_GC_INTERVAL);
+
+      std::cerr << "gc_interval: " << GC_INTERVAL << std::endl;
 
       GARBAGE_LENGTH_PREVIOUS = GARBAGE_LENGTH_LATEST;
     }
