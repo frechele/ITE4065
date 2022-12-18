@@ -1,0 +1,148 @@
+diff --git a/src/backend/access/border_collie/border_collie.c b/src/backend/access/border_collie/border_collie.c
+index 907aee3..dbef6f6 100644
+--- a/src/backend/access/border_collie/border_collie.c
++++ b/src/backend/access/border_collie/border_collie.c
+@@ -4,6 +4,8 @@
+ #include "storage/lwlock.h"
+ #include "storage/shmem.h"
+ 
++#include <math.h>
++
+ Flag *BorderCollieFlags;
+ 
+ Size
+@@ -41,3 +43,47 @@ BorderCollieFlagsInit(void)
+ 
+ 	LWLockRelease(AddinShmemInitLock);
+ }
++
++static XLogRecPtr maxLSN(XLogRecPtr a, XLogRecPtr b)
++{
++	return a > b ? a : b;
++}
++
++static XLogRecPtr minLSN(XLogRecPtr a, XLogRecPtr b)
++{
++	return a < b ? a : b;
++}
++
++void
++BorderCollieExecution(void)
++{
++	const XLogRecPtr cutoff = GetXLogInsertRecPtr();
++	XLogRecPtr RLB = GetXLogWriteRecPtr();
++
++	XLogRecPtr min_RLB = UINT64_MAX;
++	for (int workerID = 0; workerID < NBorderCollieFlags; ++workerID)
++	{
++		if (BorderCollieFlags[workerID].color == WHITE)
++		{
++			min_RLB = minLSN(min_RLB, BorderCollieFlags[workerID].timestamp);
++		}
++		else
++		{
++			min_RLB = minLSN(min_RLB, maxLSN(cutoff, BorderCollieFlags[workerID].timestamp));
++		}
++	}
++
++	if (RLB < min_RLB)
++		RLB = min_RLB;
++
++	XLogFlush(RLB);
++
++	ereport(LOG, (errmsg("[Border Collie] cutoff: %lu, RLB: %lu", cutoff, RLB)));
++}
++
++void
++SetBorderCollieFlag(int id, XLogRecPtr lsn, unsigned char color)
++{
++	BorderCollieFlags[id].timestamp = lsn;
++	BorderCollieFlags[id].color = color;
++}
+diff --git a/src/backend/access/transam/xlog.c b/src/backend/access/transam/xlog.c
+index 248a40e..5466451 100644
+--- a/src/backend/access/transam/xlog.c
++++ b/src/backend/access/transam/xlog.c
+@@ -46,6 +46,7 @@
+ #include <sys/time.h>
+ #include <unistd.h>
+ 
++#include "access/border_collie.h"
+ #include "access/clog.h"
+ #include "access/commit_ts.h"
+ #include "access/heaptoast.h"
+@@ -845,6 +846,8 @@ XLogInsertRecord(XLogRecData *rdata,
+ 
+ 	if (inserted)
+ 	{
++		SetBorderCollieFlag(MyProc->pgprocno, StartPos, BLACK);
++
+ 		/*
+ 		 * Now that xl_prev has been filled in, calculate CRC of the record
+ 		 * header.
+@@ -872,6 +875,8 @@ XLogInsertRecord(XLogRecData *rdata,
+ 
+ 			WALInsertLocks[lockno].l.lastImportantAt = StartPos;
+ 		}
++
++		SetBorderCollieFlag(MyProc->pgprocno, EndPos, WHITE);
+ 	}
+ 	else
+ 	{
+@@ -2698,6 +2703,8 @@ XLogFlush(XLogRecPtr record)
+ bool
+ XLogBackgroundFlush(void)
+ {
++	return true;
++
+ 	XLogwrtRqst WriteRqst;
+ 	bool		flexible = true;
+ 	static TimestampTz lastflush;
+diff --git a/src/backend/postmaster/border_collie_process.c b/src/backend/postmaster/border_collie_process.c
+index 8fb7969..fd013c7 100644
+--- a/src/backend/postmaster/border_collie_process.c
++++ b/src/backend/postmaster/border_collie_process.c
+@@ -199,6 +199,8 @@ BorderCollieProcessMain(void)
+ 
+ 		ereport(LOG, (errmsg("[BorderCollie] %d second", tick)));
+ 
++		BorderCollieExecution();
++
+ 		++tick;
+ 
+ 		(void)WaitLatch(MyLatch,
+diff --git a/src/include/access/border_collie.h b/src/include/access/border_collie.h
+index 1b07f6f..c918239 100644
+--- a/src/include/access/border_collie.h
++++ b/src/include/access/border_collie.h
+@@ -12,14 +12,27 @@
+ #ifndef BORDER_COLLIE_H 
+ #define BORDER_COLLIE_H
+ 
+-typedef uint64_t Flag;
++#include "access/xlog.h"
++
++typedef struct 
++{
++    XLogRecPtr timestamp;
++    unsigned char color;
++} Flag;
+ 
+ extern PGDLLIMPORT int NBorderCollieFlags;
+ 
+ extern Size BorderCollieFlagsSize(void);
+ extern void BorderCollieFlagsInit(void);
+ 
+-#define GetBorderCollieFlag(id) (&BorderCollieFlag[(id)])
+-#define SetBorderCollieFlag(id, val) ( /* Your content... */ )
++extern void BorderCollieExecution(void);
++
++typedef enum
++{
++    BLACK,  // running 
++    WHITE   // complete 
++} BorderCollieFlagColor;
++
++extern void SetBorderCollieFlag(int id, XLogRecPtr lsn, unsigned char color);
+ 
+ #endif							/* BORDER_COLLIE_H */
